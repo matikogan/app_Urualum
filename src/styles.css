@@ -1,0 +1,379 @@
+:root{
+  /* Paleta URUALUM */
+  --brand: #1c6ec4;
+  --brand-2: #77a8dc;
+  --ink: #1e1e1c;
+  --ink-2: #787877;
+  --bg: #ffffff;
+  --bg-soft: #f5f7fb;
+
+  /* Tipografía y layout */
+  --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 6px 24px rgba(0,0,0,.06);
+  --space-1: 8px;  --space-2: 12px; --space-3: 16px; --space-4: 20px; --space-6: 28px;
+
+  /* Estados */
+  --ok: #2e7d32;        /* verde */
+  --warn: #f9a825;      /* amarillo */
+  --error: #c62828;     /* rojo */
+}
+
+html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); background: var(--bg); }
+
+.container { padding: var(--space-4); max-width: 1080px; margin: 0 auto; }
+.h1 { font-size: 22px; font-weight: 700; margin: 0 0 var(--space-3); }
+.h2 { font-size: 18px; font-weight: 600; margin: var(--space-3) 0 var(--space-2); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+.card { background:#fff; border:1px solid #e8ebf0; border-radius: var(--radius); padding: var(--space-3); box-shadow: var(--shadow); }
+.card + .card { margin-top: var(--space-3); }
+
+.row { display:flex; gap: var(--space-3); align-items:center; flex-wrap:wrap; }
+.kpi { background: var(--bg-soft); border-radius: var(--radius-sm); padding: 6px 10px; }
+
+.btn {
+  appearance:none; border:0; border-radius: 12px; padding: 10px 14px; font-weight:600;
+  cursor:pointer; transition: transform .02s ease;
+}
+.btn:active { transform: scale(.98); }
+
+.btn--primary { background: var(--brand); color:#fff; }
+.btn--secondary { background: #eef4fb; color: var(--brand); }
+.btn--danger { background: var(--error); color:#fff; }
+.btn[disabled] { opacity:.6; cursor:not-allowed; }
+
+.input, select, textarea {
+  width: 100%; border:1px solid #dde3ea; border-radius: 10px; padding: 10px 12px;
+  font-size: 15px; background:#fff;
+}
+
+/* Pills de estado */
+.pill { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; font-weight:600; font-size:13px; }
+.pill--ok { background:#e7f5ec; color:var(--ok); }
+.pill--warn { background:#fff7e0; color:#a37500; }
+.pill--error{ background:#fdecea; color:var(--error); }
+
+/* Toast */
+.toast {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  min-width: 260px; background:#111; color:#fff; padding: 12px 16px; border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.25); z-index: 9999;
+}
+
+/* TopBar */
+.topbar {
+  position: sticky; top:0; z-index:100; background:#fff; border-bottom:1px solid #eaeaea;
+  display:flex; align-items:center; justify-content:space-between; padding: 10px 16px;
+}
+
+/* Nuevo layout izquierda/derecha */
+.topbar-left { position: relative; display:flex; align-items:center; }
+
+/* Botón de usuario */
+.userbadge { display:flex; align-items:center; gap:10px; padding: 8px 12px; }
+.userbadge-initials {
+  width:28px; height:28px; border-radius:50%;
+  display:inline-flex; align-items:center; justify-content:center;
+  background: var(--brand); color:#fff; font-weight:700;
+}
+.userbadge-text { font-weight:600; color: var(--ink); }
+
+/* Menú desplegable */
+.menu {
+  position:absolute; top:44px; left:0;
+  min-width: 240px; background:#fff; border:1px solid #e9eef5;
+  border-radius: 12px; box-shadow: var(--shadow); padding: 8px;
+}
+.menu-item { padding: 8px 10px; }
+.menu-title { font-weight:700; }
+.menu-sub { color: var(--ink-2); font-size: 13px; margin-top:4px; }
+.menu-divider { border:0; border-top:1px solid #eef2f7; margin: 6px 0; }
+.menu-action {
+  width:100%; text-align:left; padding:10px; border:0; border-radius:10px;
+  background:#fff; cursor:pointer; font-weight:600; color: var(--error);
+}
+.menu-action:hover { background:#fff5f5; }
+
+/* Logo a la derecha más grande */
+.brand-right img { height: 60px; width:auto; display:block; }
+/* si lo querés aún más grande, probá 48px o 56px */
+
+.userbadge {
+  display:flex; align-items:center; gap:10px; 
+  padding: 8px 12px; border-radius:12px;
+}
+
+.userbadge-icon {
+  width:26px; height:26px;
+  color: var(--brand); /* azul corporativo */
+}
+
+.userbadge-text {
+  font-weight:600; color: var(--ink);
+}
+
+
+.brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.5px; color:var(--ink); }
+.brand img { height:28px; width:auto; }
+.user { display:flex; gap:12px; align-items:center; color: var(--ink-2); }
+.user strong { color: var(--ink); }
+
+/*Estilos del inicio*/
+.btn-big {
+  font-size: 18px;          /* letra más grande */
+  padding: 16px 22px;       /* más altos/anchos */
+  border-radius: 14px;      /* bordes suaves */
+}
+
+/* Centrar vertical/horizontal el contenido debajo del topbar */
+.screen-center {
+  min-height: calc(100vh - 72px); /* ajustá 72px si tu topbar es más alto/bajo */
+  display: grid;
+  place-items: center;
+}
+
+/* Contenedor de los botones del home */
+.menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 50px;                 /* más separación */
+  width: 100%;
+  max-width: 360px;          /* ancho cómodo en móvil/tablet */
+}
+
+/* Botón grande y con presencia */
+.btn-big { font-size: 18px; padding: 16px 22px; border-radius: 14px; }
+
+/* Un toque de elevación para que destaquen */
+.btn--elevated { box-shadow: 0 6px 20px rgba(0,0,0,.06); }
+.btn--elevated:active { box-shadow: 0 3px 12px rgba(0,0,0,.08); }
+
+/* Variante “outline” para el secundario: más contraste que el gris plano */
+.btn--outline {
+  background: #fff;
+  border: 2px solid var(--brand);
+  color: var(--brand);
+}
+.btn--outline:hover { background: #f3f8ff; }
+
+/* Ícono dentro del botón (opcional) */
+.btn-icon { font-size: 20px; line-height: 0; margin-right: 10px; }
+
+.menu-buttons-center {
+  min-height: calc(100vh - 300px); /* resta aprox topbar + título */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  gap: 85px;
+}
+
+/*FACTURA DE IMPORTACION*/
+/* Grid para cards de facturas */
+.invoice-grid {
+  display: grid;
+  gap: 16px;
+}
+
+/* En pantallas más grandes mostrás de a dos columnas */
+@media (min-width: 720px) {
+  .invoice-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* Card destacada para "Factura" */
+.card--highlight {
+  border: 2px solid var(--brand);
+  box-shadow: 0 8px 20px rgba(28,110,196,0.08);
+  padding: var(--space-4);
+}
+
+/* Efecto “interactivo” al pasar el mouse (desktop) */
+.card--selectable { transition: box-shadow .15s ease, transform .02s ease; }
+.card--selectable:hover { box-shadow: 0 10px 26px rgba(0,0,0,.08); }
+.card--selectable:active { transform: scale(.995); }
+
+/* Header dentro de la card */
+.card-header {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--brand);
+  margin-bottom: var(--space-2);
+}
+
+/* Lista de campos (proveedor, fecha, etc.) en dos columnas responsivas */
+.meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+  margin-bottom: var(--space-3);
+}
+.meta-item { display: flex; flex-direction: column; }
+.meta-label {
+  font-size: 12px; font-weight: 600; letter-spacing: .2px;
+  color: var(--ink-2); text-transform: uppercase;
+}
+.meta-value { font-size: 15px; color: var(--ink); }
+
+/* Centrado del botón dentro de la card */
+.btn-center { display: flex; justify-content: center; }
+
+/* Estado vacío/placeholder */
+.empty-card {
+  text-align: center;
+  background: var(--bg-soft);
+}
+.muted { color: var(--ink-2); }
+
+/*ESCENAR.JS PAGINA DETALLE PRODUCTOS DE FACTURA DE IMPO*/
+/* Grid de productos */
+.product-grid {
+  display: grid;
+  gap: 12px;
+}
+@media (min-width: 680px) { .product-grid { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1080px) { .product-grid { grid-template-columns: 1fr 1fr 1fr; } }
+
+/* Card de producto */
+.product-card { padding: var(--space-4); }
+/* Encabezado compacto: Customer No. + Color grandes */
+.product-head {
+  margin: 0 0 6px;
+}
+.product-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+}
+.product-customer {
+  font-weight: 800;
+  font-size: 18px;                /* número grande */
+  color: var(--ink);
+}
+.product-color {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--brand);
+}
+/* Descripción debajo (más suave) */
+.product-desc {
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+/* KPIs chicos */
+.kpi {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 10px;
+}
+.product-title { font-weight: 800; font-size: 16px; color: var(--ink); }
+.product-sub { color: var(--ink-2); font-size: 13px; }
+
+/* meta en 3 columnas para el producto */
+.meta--3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+/* Barra de progreso */
+/* Progreso finito */
+.progress { height: 6px; margin-top: 8px; }
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brand), var(--brand-2));
+  border-radius: 999px;
+  transition: width .25s ease;
+}
+
+/* Acciones */
+/* Acciones apiladas y compactas */
+.product-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.btn-sm {
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+/* Estado vacío ya lo usamos, por si no estaba */
+.empty-card {
+  text-align: center;
+  background: var(--bg-soft);
+}
+
+/* Util existente por si no la agregaste aún */
+.btn-center { display: flex; justify-content: center; }
+
+/* Tarjeta compacta */
+.product-card {
+  padding: 14px;
+  border-radius: 12px;
+}
+
+/* Card compacta para factura seleccionada */
+.card--compact {
+  border: 1px solid #e2e6eb;
+  padding: 12px 16px;
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  background: #fff;
+}
+
+
+.factura-heading {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--brand);
+}
+
+.factura-sub {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
+/*Boton de regreso*/
+.btn-sm {
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+
+
+/*CONFIRMAR.JS*/
+/* Banners */
+.banner {
+  border:1px solid #e9eef5;
+  border-radius:12px;
+  padding:12px 14px;
+  margin-top:12px;
+}
+.banner--warn { background:#fff7e0; border-color:#ffecb3; }
+.banner--ok   { background:#e7f5ec; border-color:#cde9d6; }
+.banner-list { margin:6px 0 0 18px; }
+
+/* Tabla limpia y responsive */
+.table-wrap { width:100%; overflow:auto; }
+.table {
+  width:100%; border-collapse: collapse; font-size:14px;
+}
+.table th, .table td {
+  text-align:left; padding:10px 12px; border-bottom:1px solid #eef2f7;
+}
+.table th { font-weight:700; color: var(--ink); }
+.small { font-size:12px; }
+
+/* Card compacta ya usada en otras pantallas */
+.card--compact {
+  border: 1px solid #e2e6eb;
+  padding: 12px 16px;
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  background: #fff;
+}
+.factura-heading { font-weight:700; font-size:16px; color: var(--brand); }
+.factura-sub { font-size:13px; color: var(--ink-2); margin-top:2px; }
