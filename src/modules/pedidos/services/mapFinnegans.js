@@ -1,0 +1,294 @@
+/*
+import { parseDescripcionPedido } from "./parseDescripcionPedido";
+
+
+// --- PARSER ROBUSTO DE FECHA DESDE FINNEGANS ---
+function normalizeToYMD(d) {
+  // retorna "YYYY-MM-DD" o null
+  try {
+    if (d instanceof Date) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+    if (typeof d === "number") {
+      // epoch ms
+      return normalizeToYMD(new Date(d));
+    }
+    const s = String(d || "").trim();
+    if (!s) return null;
+
+    // yyyy-mm-dd
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+
+    // dd/mm/yyyy
+    m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+
+    // ✅ dd-mm-yyyy (caso que viste en el log)
+    m = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+
+    // yyyymmdd
+    m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+
+    // /Date(1695600000000)/
+    m = s.match(/^\/Date\((\d+)\)\/$/);
+    if (m) return normalizeToYMD(new Date(Number(m[1])));
+
+    // ISO (yyyy-mm-ddThh:mm:ssZ)
+    m = s.match(/^(\d{4}-\d{2}-\d{2})T/);
+    if (m) return m[1];
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function parseFinFecha(fin) {
+  if (!fin || typeof fin !== "object") return null;
+
+  // Claves preferidas según tu inspección
+  const preferredKeys = [
+    "FECHACOMPROBANTE", // la vimos en el log
+    "FECHA",            // la vimos en el log
+    "FECHADOC",
+    "DOCFECHA",
+    "Fecha",
+    "FechaDocumento",
+    "FechaEmision",
+    "FECHAEMISION",
+    "FECHACREACION",
+    "FecDoc",
+    "FEC"
+  ];
+
+  for (const k of preferredKeys) {
+    if (k in fin) {
+      const ymd = normalizeToYMD(fin[k]);
+      if (ymd) return ymd;
+    }
+  }
+
+  // Si no encontramos en preferidas, probar cualquier clave con "fecha"
+  for (const [k, v] of Object.entries(fin)) {
+    if (/fecha/i.test(k)) {
+      const ymd = normalizeToYMD(v);
+      if (ymd) return ymd;
+    }
+  }
+
+  // Último recurso: cualquier valor que parezca fecha
+  for (const v of Object.values(fin)) {
+    const ymd = normalizeToYMD(v);
+    if (ymd) return ymd;
+  }
+  return null;
+}
+
+
+
+
+/**
+ * Mapea UNA FILA del reporte analisisPedidoVenta (Finnegans)
+ * a nuestro pedido en Firestore.
+ 
+export function mapFinDocToPedido(fin) {
+  if (!fin) return null;
+
+  // 1) ID / número: en tu JSON real viene como DOCNROINT (ej: "PEDVTA - 12533")
+  const id = String(
+    fin.DOCNROINT ||
+    fin.NumeroDocumento ||
+    fin.IdentificacionExterna ||
+    fin.Nombre ||
+    ""
+  ).trim();
+  if (!id) return null;
+
+  // 2) Datos base
+  const cliente = String(fin.CLIENTE || fin.Cliente || "").trim();
+  const descripcion = String(fin.DESCRIPCION || fin.Descripcion || "").trim();
+
+  // Nuevo: intentar extraer código de cliente desde la fila del reporte
+ const clienteCodigo =
+   fin.CLIENTECODIGO || fin.ClienteCodigo ||
+   fin.ORGANIZACIONCODIGO || fin.OrganizacionCodigo ||
+   fin.CODIGOCLIENTE || fin.CodigoCliente ||
+   fin.CLIENTEID || fin.ClienteId ||
+   null;
+
+  // 3) Depósito / método desde la descripción "ISABELA - RETIRA"
+  const { deposito: depParsed, metodoEntrega: metParsed } = parseDescripcionPedido(descripcion);
+
+  // 4) Producto y cantidad (viene por fila)
+  const prodCod = String(fin.PRODUCTO || fin.Producto || fin.ProductoCodigo || "").trim();
+  const prodCant = Number(fin.CANTIDAD ?? fin.Cantidad ?? 0);
+  const productos = prodCod ? [{ cod: prodCod, cant: prodCant || 0 }] : [];
+
+  // ...
+  const finFecha = parseFinFecha(fin);
+
+  return {
+    id,
+    numero: id,
+    cliente,
+    clienteCodigo: clienteCodigo ? String(clienteCodigo).trim() : null,
+    descripcion,
+    deposito: depParsed || null,
+    metodoEntrega: metParsed || null,
+    productos,
+    source: "finnegans",
+    finFecha: finFecha || null, // 👈 ahora debería venir con valor
+  };
+
+}
+
+*/
+
+import { parseDescripcionPedido } from "./parseDescripcionPedido";
+
+// --- PARSER ROBUSTO DE FECHA DESDE FINNEGANS ---
+function normalizeToYMD(d) {
+  // retorna "YYYY-MM-DD" o null
+  try {
+    if (d instanceof Date) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+    if (typeof d === "number") {
+      // epoch ms
+      return normalizeToYMD(new Date(d));
+    }
+    const s = String(d || "").trim();
+    if (!s) return null;
+
+    // yyyy-mm-dd
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+
+    // dd/mm/yyyy
+    m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+
+    // dd-mm-yyyy (caso que viste en el log)
+    m = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+
+    // yyyymmdd
+    m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+
+    // /Date(1695600000000)/
+    m = s.match(/^\/Date\((\d+)\)\/$/);
+    if (m) return normalizeToYMD(new Date(Number(m[1])));
+
+    // ISO (yyyy-mm-ddThh:mm:ssZ)
+    m = s.match(/^(\d{4}-\d{2}-\d{2})T/);
+    if (m) return m[1];
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function parseFinFecha(fin) {
+  if (!fin || typeof fin !== "object") return null;
+
+  // Claves preferidas según tu inspección
+  const preferredKeys = [
+    "FECHACOMPROBANTE", // la vimos en el log
+    "FECHA",            // la vimos en el log
+    "FECHADOC",
+    "DOCFECHA",
+    "Fecha",
+    "FechaDocumento",
+    "FechaEmision",
+    "FECHAEMISION",
+    "FECHACREACION",
+    "FecDoc",
+    "FEC"
+  ];
+
+  for (const k of preferredKeys) {
+    if (k in fin) {
+      const ymd = normalizeToYMD(fin[k]);
+      if (ymd) return ymd;
+    }
+  }
+
+  // Si no encontramos en preferidas, probar cualquier clave con "fecha"
+  for (const [k, v] of Object.entries(fin)) {
+    if (/fecha/i.test(k)) {
+      const ymd = normalizeToYMD(v);
+      if (ymd) return ymd;
+    }
+  }
+
+  // Último recurso: cualquier valor que parezca fecha
+  for (const v of Object.values(fin)) {
+    const ymd = normalizeToYMD(v);
+    if (ymd) return ymd;
+  }
+  return null;
+}
+
+/**
+ * Mapea UNA FILA del reporte analisisPedidoVenta (Finnegans)
+ * a nuestro pedido en Firestore.
+ */
+export function mapFinDocToPedido(fin) {
+  if (!fin) return null;
+
+  // 1) ID / número: en tu JSON real viene como DOCNROINT (ej: "PEDVTA - 12533")
+  const id = String(
+    fin.DOCNROINT ||
+    fin.NumeroDocumento ||
+    fin.IdentificacionExterna ||
+    fin.Nombre ||
+    ""
+  ).trim();
+  if (!id) return null;
+
+  // 2) Datos base
+  const cliente = String(fin.CLIENTE || fin.Cliente || "").trim();
+  const descripcion = String(fin.DESCRIPCION || fin.Descripcion || "").trim();
+
+  // 2.1) Intentar extraer CÓDIGO de cliente (si el reporte lo trae)
+  const clienteCodigo =
+    fin.CLIENTECODIGO || fin.ClienteCodigo ||
+    fin.ORGANIZACIONCODIGO || fin.OrganizacionCodigo ||
+    fin.CODIGOCLIENTE || fin.CodigoCliente ||
+    fin.CLIENTEID || fin.ClienteId ||
+    null;
+
+  // 3) Depósito / método desde la descripción "ISABELA - RETIRA"
+  const { deposito: depParsed, metodoEntrega: metParsed } = parseDescripcionPedido(descripcion);
+
+  // 4) Producto y cantidad (viene por fila)
+  const prodCod = String(fin.PRODUCTO || fin.Producto || fin.ProductoCodigo || "").trim();
+  const prodCant = Number(fin.CANTIDAD ?? fin.Cantidad ?? 0);
+  const productos = prodCod ? [{ cod: prodCod, cant: prodCant || 0 }] : [];
+
+  const finFecha = parseFinFecha(fin);
+
+  return {
+    id,
+    numero: id,
+    cliente,
+    clienteCodigo: clienteCodigo ? String(clienteCodigo).trim() : null,
+    descripcion,
+    deposito: depParsed || null,
+    metodoEntrega: metParsed || null,
+    productos,
+    source: "finnegans",
+    finFecha: finFecha || null,
+  };
+}

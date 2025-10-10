@@ -1,180 +1,772 @@
-import React, { useEffect, useState } from "react";
+// src/modules/pedidos/pages/PedidoDetalleOperario.js
+import { useEffect, useState, useMemo } from "react";
 import { useParams } from "react-router-dom";
-import { doc, getDoc, setDoc, collection, getDocs, updateDoc, increment } from "firebase/firestore";
-import { db } from "../../../firebase";
+import { useApp } from "../../../context/AppContext";
+import { useAuth } from "../../../context/AuthContext";
+import { getPedido } from "../services/pedidosFS";
+import { cambiarEstado, ESTADOS } from "../services/estados";
+import { getFlag } from "../services/featureFlags";
 import QrScanner from "../../../components/QrScanner";
+import { getCatalogoByCodUru } from "../services/catalogo";
+import { getStockTiras, confirmarPedidoConStock } from "../services/stockTiras";
+
+// Modales que ya tenés en /components
+import PackConfirmModal from "./PackConfirmModal";
+import PackErrorModal from "./PackErrorModal";
+import Modal from "./Modal";
+
+console.info("[OPERARIO DETALLE] SOURCE =", "pages/PedidoDetalleOperario.js v1");
 
 
-export default function PedidoDetalleOperario() {
-  const { id } = useParams();
-  const [pedido, setPedido] = useState(null);
-  const [catalogo, setCatalogo] = useState([]);
-  const [stockTiras, setStockTiras] = useState([]);
-  const [tirasPreparadas, setTirasPreparadas] = useState({});
-  const [paquetesEscaneados, setPaquetesEscaneados] = useState([]);
+// ============== Helpers ==============
+function toURUCode(value) {
+  const s = String(value ?? "").trim();
+  const mNum = s.match(/\b\d{7,}\b/);
+  if (mNum) return mNum[0];
+  return s.split(/\s+/)[0].replace(/[^\w-]/g, "");
+}
+function toCustomerNo(uru) {
+  return String(uru || "").trim() || "—";
+}
+function reqQty(it) {
+  return it.cant ?? it.cantidad ?? it.qty ?? 0;
+}
+function keyFor(it, i) {
+  return `${(it.cod || it.codigo || it.codigoURU || "IDX")}-${i}`;
+}
 
-
-  const todosLosProductosCompletos = pedido.productos.every((prod) => {
-  const preparadas = tirasPreparadas[prod.codigo]?.cantidad || 0;
-  return preparadas >= prod.cantidad;
-});
-
-
-  // 🔄 Cargar pedido
-  useEffect(() => {
-    const fetchPedido = async () => {
-      const docRef = doc(db, "pedidosAsignados", id);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) setPedido(snap.data());
-    };
-
-    const fetchCatalogo = async () => {
-      const snap = await getDocs(collection(db, "catalogoProductos"));
-      setCatalogo(snap.docs.map(doc => doc.data()));
-    };
-
-    const fetchStock = async () => {
-      const snap = await getDocs(collection(db, "stock_tiras"));
-      setStockTiras(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    };
-
-    fetchPedido();
-    fetchCatalogo();
-    fetchStock();
-  }, [id]);
-
-  const agregarTirasPreparadas = (codigo, cantidad, restante = 0, paqueteId = null) => {
-    setTirasPreparadas(prev => {
-      const actual = prev[codigo]?.cantidad || 0;
-      const nuevos = {
-        ...prev,
-        [codigo]: {
-          cantidad: actual + cantidad,
-          restante: paqueteId ? restante : 0,
-          paqueteId: paqueteId || null
-        }
-      };
-      return nuevos;
-    });
-
-    if (paqueteId) {
-      setPaquetesEscaneados(prev => [...prev, paqueteId]);
-    }
-  };
-
-  const confirmarPreparacion = async () => {
-  for (const codigo in tirasPreparadas) {
-    const { cantidad, restante, paqueteId } = tirasPreparadas[codigo];
-
-    // Descontar del stock_tiras si existía stock
-    const stockDoc = stockTiras.find(s => s.codigo === codigo);
-    if (stockDoc) {
-      const ref = doc(db, "stock_tiras", stockDoc.id);
-      await updateDoc(ref, {
-        cantidad: increment(-cantidad)
-      });
-    }
-
-    // Si hubo un paquete escaneado y sobran tiras -> Agregar las sobrantes
-    if (paqueteId && restante > 0) {
-      await setDoc(doc(db, "stock_tiras", `${codigo}_${Date.now()}`), {
-        codigo,
-        cantidad: restante
-      });
-    }
-  }
-
-  // 👇 Nuevo paso: actualizar estado del pedido
-  try {
-    const pedidoRef = doc(db, "pedidosAsignados", id);
-    await updateDoc(pedidoRef, {
-      estado: "preparado"
-    });
-    alert("✅ Pedido marcado como preparado y stock actualizado.");
-  } catch (err) {
-    console.error("Error al actualizar estado del pedido:", err);
-    alert("⚠️ Error al actualizar el estado del pedido.");
-  }
-};
-
-
-  if (!pedido) return <p style={{ padding: 20 }}>Cargando pedido...</p>;
-
-  const obtenerFinish = (codigo) => {
-    return catalogo.find(p => p.codUru === codigo)?.finish || "—";
-  };
-
-  const obtenerCustomerNo = (codigo) => {
-    return catalogo.find(p => p.codUru === codigo)?.customerNo || "—";
-  };
-
-  const stockDisponible = (codigo) => {
-    return stockTiras.find(s => s.codigo === codigo)?.cantidad || 0;
-  };
-
+// Control de cantidad horizontal (± 1)
+function QtyRow({
+  value,
+  onDec,
+  onInc,
+  disabledMinus = false,
+  disabledPlus = false,
+  className = "",
+}) {
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Pedido asignado</h2>
-      <p><strong>ID:</strong> {pedido.id}</p>
-      <p><strong>Cliente:</strong> {pedido.cliente}</p>
-      <p><strong>Fecha:</strong> {pedido.fecha}</p>
+    <div className={`qty ${className}`}>
+      <button
+        type="button"
+        className="btn btn--outline qty__btn"
+        onClick={onDec}
+        disabled={disabledMinus}
+        aria-label="Restar"
+      >
+        −
+      </button>
 
-      <h3>Productos:</h3>
-      <ul>
-        {pedido.productos.map((prod) => {
-          const preparadas = tirasPreparadas[prod.codigo]?.cantidad || 0;
-          const completo = preparadas >= prod.cantidad;
-          return (
-            <li key={prod.codigo} style={{ marginBottom: 10 }}>
-              <strong>{obtenerCustomerNo(prod.codigo)}</strong> – {obtenerFinish(prod.codigo)} <br />
-              Pedido: {prod.cantidad} | Preparado: {preparadas}{" "}
-              {completo && <span style={{ color: "green", fontWeight: "bold" }}>✔️</span>} <br />
-              Stock sueltas disponible: {stockDisponible(prod.codigo)}
-            </li>
-          );
-        })}
-      </ul>
-
-      <h3>Escanear paquete</h3>
-      <QrScanner
-        onScan={(data) => {
-          try {
-            const parsed = JSON.parse(data);
-            const { codUru, bundles, pieces } = parsed;
-            const pedidoProd = pedido.productos.find(p => p.codigo === codUru);
-            if (!pedidoProd) return alert("📦 Este paquete no corresponde a este pedido.");
-
-            const yaPreparadas = tirasPreparadas[codUru]?.cantidad || 0;
-            const faltan = pedidoProd.cantidad - yaPreparadas;
-
-            if (faltan <= 0) return alert("✅ Este producto ya está completo.");
-
-            const usar = Math.min(faltan, pieces);
-            const restante = pieces - usar;
-
-            agregarTirasPreparadas(codUru, usar, restante, parsed.id || Date.now());
-          } catch (err) {
-            console.error("Error escaneando:", err);
-            alert("❌ QR inválido");
-          }
-        }}
-      />
+      <span className="qty__num" aria-live="polite">{value}</span>
 
       <button
-  onClick={confirmarPreparacion}
-  disabled={!todosLosProductosCompletos}
-  style={{
-    marginTop: 20,
-    background: todosLosProductosCompletos ? "green" : "gray",
-    color: "white",
-    padding: "10px 20px",
-    cursor: todosLosProductosCompletos ? "pointer" : "not-allowed",
-    opacity: todosLosProductosCompletos ? 1 : 0.7,
-  }}
->
-  Confirmar pedido preparado
-</button>
+        type="button"
+        className="btn btn--outline qty__btn"
+        onClick={onInc}
+        disabled={disabledPlus}
+        aria-label="Sumar"
+      >
+        +
+      </button>
+    </div>
+  );
+}
 
+
+// ============== Pantalla ==============
+export default function PedidoDetalleOperario() {
+  const { id : rawId } = useParams();
+  const pedidoId = useMemo(() => decodeURIComponent(rawId || ""), [rawId]);
+  const { toast, haptics } = useApp();
+  const { user } = useAuth();
+
+  const [pedido, setPedido] = useState(null);
+  const [lite, setLite] = useState(true);
+  const [loading, setLoading] = useState(true);
+
+  // estado por ítem
+  const [prep, setPrep] = useState({});
+
+  // LITE
+  const [checks, setChecks] = useState({});
+  const totalProductos = Array.isArray(pedido?.productos) ? pedido.productos.length : 0;
+  const checkedCount = Object.values(checks).filter(Boolean).length;
+  const allChecked = totalProductos > 0 && checkedCount === totalProductos;
+
+  // catálogo
+  const [catalogoMap, setCatalogoMap] = useState({});
+
+  // overlay flow
+  const [scanForKey, setScanForKey] = useState(null); // string|null
+  const [packConfirm, setPackConfirm] = useState(null); // { key, nombre, packSize, remaining, defaultQty } | null
+  const [packError, setPackError] = useState(null); // { esperado, qr } | null
+
+  // DEBUG: ver params/auth en consola
+  useEffect(() => {
+    console.log("[Operario] rawId (URL):", rawId);
+    console.log("[Operario] pedidoId (decodificado):", pedidoId);
+    console.log("[Operario] user uid:", user?.uid || null);
+  }, [rawId, pedidoId, user?.uid]);
+
+  // DEBUG: fetch del pedido
+  useEffect(() => {
+    (async () => {
+      if (!pedidoId) {
+        console.warn("[Operario] Sin pedidoId -> no leo Firestore");
+        return;
+      }
+      setLoading(true);
+      console.log("[Operario] getPedido(", pedidoId, ") …");
+      try {
+        const p = await getPedido(pedidoId);
+        console.log("[Operario] getPedido OK:", p);
+        setPedido(p || null);
+      } catch (e) {
+        console.error("[Operario] getPedido ERROR:", e);
+        setPedido(null);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [pedidoId]);
+
+  // DEBUG: cada vez que cambia 'pedido'
+  useEffect(() => {
+    if (pedido) {
+      console.log("[Operario] pedido.estado:", pedido.estado, " productos:", pedido.productos?.length || 0);
+    } else {
+      console.log("[Operario] pedido = null");
+    }
+  }, [pedido]);
+
+
+
+  // ===== util por item =====
+  function getItemInfoByKey(k) {
+    if (!pedido?.productos) return null;
+    const idx = Number(String(k).split("-").pop());
+    const it = pedido.productos[idx];
+    if (!it) return null;
+    const need = reqQty(it);
+    const raw = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
+    const uruExpected = toURUCode(raw);
+    return { it, idx, need, uruExpected };
+  }
+
+  function getRemainingForKey(k) {
+    const info = getItemInfoByKey(k);
+    if (!info) return 0;
+    const { need } = info;
+    const p = prep[k] || {};
+    const usados = Number(p.usarSueltas || 0) + Number(p.usarDePaquete || 0);
+    return Math.max(0, need - usados);
+  }
+
+  // clamp según “lo que falta” y límites (stock/pack)
+  function clampPrepForNeed(k, draft) {
+    const p = { ...(prep[k] || {}), ...draft };
+    const info = getItemInfoByKey(k);
+    if (!info) return p;
+    const { need } = info;
+
+    const stock = Number(p.stock || 0);
+    const packSize = Number(p.paquete?.packSize || 0);
+
+    let usarSueltas = Math.min(Number(p.usarSueltas || 0), stock);
+    let usarDePaquete = Math.min(Number(p.usarDePaquete || 0), packSize);
+
+    const total = usarSueltas + usarDePaquete;
+    if (total > need) {
+      const exceso = total - need;
+      if (usarDePaquete >= exceso) usarDePaquete -= exceso;
+      else usarSueltas = Math.max(0, usarSueltas - (exceso - usarDePaquete));
+    }
+    return { ...p, usarSueltas, usarDePaquete };
+  }
+
+  // ===== escaneo =====
+  function onScanPaquete(payload) {
+    try {
+      if (!scanForKey) return;
+
+      const info = getItemInfoByKey(scanForKey);
+      if (!info) { toast?.error?.("No se encontró el producto seleccionado"); return; }
+      const { uruExpected } = info;
+
+      const codUruQR = toURUCode(payload.codUru || payload.codigo_urualum || payload.codigo || "");
+      const packSize = Number(payload.packSize || payload.cantidad || 0);
+
+      if (!codUruQR || !packSize) {
+        toast?.error?.("QR inválido: faltan datos");
+        return;
+      }
+
+      if (codUruQR !== uruExpected) {
+        // QR incorrecto → muestro error SIN cerrar la cámara (seguir reintento)
+        setPackError({ esperado: uruExpected, qr: codUruQR });
+        return;
+      }
+
+      // QR correcto → cierro cámara y abro confirm
+      const remaining = getRemainingForKey(scanForKey);
+      const defaultQty = Math.min(remaining, packSize);
+      const nombre = catalogoMap?.[uruExpected]?.customerNo || toCustomerNo(uruExpected);
+
+      setPackConfirm({ key: scanForKey, nombre, packSize, remaining, defaultQty });
+      setScanForKey(null);
+    } catch (e) {
+      console.error(e);
+      toast?.error?.("No se pudo procesar el QR");
+    }
+  }
+
+  // ===== efectos =====
+  useEffect(() => { (async () => setLite(await getFlag("MODO_LITE")))(); }, []);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const p = await getPedido(pedidoId);
+      setPedido(p);
+      setLoading(false);
+    })();
+  }, [pedidoId]);
+
+  useEffect(() => {
+    if (!pedido?.productos || !Array.isArray(pedido.productos)) return;
+    const codigosURU = Array.from(
+      new Set(
+        pedido.productos
+          .map(p => p.cod || p.codigo || p.codigoURU || p.desc || p.descripcion || p.nombre)
+          .filter(Boolean)
+          .map(toURUCode)
+          .filter(Boolean)
+      )
+    );
+    if (codigosURU.length === 0) { setCatalogoMap({}); return; }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const entries = await Promise.all(
+          codigosURU.map(async (uru) => {
+            const d = await getCatalogoByCodUru(uru);
+            return [uru, d || null];
+          })
+        );
+        if (!cancelled) setCatalogoMap(Object.fromEntries(entries));
+      } catch (e) { console.error("[Operario] catálogo error", e?.code || e); }
+    })();
+    return () => { cancelled = true; };
+  }, [pedido?.productos]);
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      if (!pedido?.productos) return;
+      const next = {};
+      for (let i = 0; i < pedido.productos.length; i++) {
+        const it = pedido.productos[i];
+        const raw = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
+        const uru = toURUCode(raw);
+        if (!uru) continue;
+        const stock = await getStockTiras(uru).catch(() => 0);
+        next[keyFor(it, i)] = { stock, usarSueltas: 0, paquete: null, usarDePaquete: 0 };
+      }
+      if (!cancel) setPrep(next);
+    })();
+    return () => { cancel = true; };
+  }, [pedido?.productos]);
+
+  // ===== UI helpers =====
+  if (loading) return <p className="p-3">Cargando…</p>;
+  if (!pedido) return <p className="p-3">Pedido no encontrado.</p>;
+  if (pedido.operarioId && pedido.operarioId !== user?.uid) {
+    return <p className="p-3">No tenés acceso a este pedido.</p>;
+  }
+
+  async function onComenzar() {
+    try {
+      await cambiarEstado(pedidoId, ESTADOS.EN_PREPARACION);
+      haptics?.success?.();
+      toast?.success?.("Preparación iniciada");
+      const p = await getPedido(pedidoId);
+      setPedido(p);
+    } catch (e) { toast?.error?.(e.message); }
+  }
+  function toggleCheck(k) { setChecks(prev => ({ ...prev, [k]: !prev[k] })); }
+  function marcarTodo() {
+    const next = {};
+    (pedido?.productos || []).forEach((it, i) => { next[keyFor(it, i)] = true; });
+    setChecks(next);
+  }
+  async function onFinalizarLite() {
+    try {
+      await cambiarEstado(pedidoId, ESTADOS.PREPARADO);
+      haptics?.success?.();
+      toast?.success?.("Pedido preparado");
+    } catch (e) { toast?.error?.(e.message); }
+  }
+
+  // ===== Overlay único (arriba de todo) =====
+  const overlayOpen = !!(scanForKey || packError || packConfirm);
+
+  return (
+    <div className="p-3 space-y-3">
+      <header>
+        <h1 className="font-bold">Pedido #{pedido.numero}</h1>
+        <p className="text-sm text-gray-600">{pedido.cliente}</p>
+      </header>
+
+      {pedido.estado === ESTADOS.ASIGNADO && (
+        <button className="w-full py-3 rounded bg-black text-white" onClick={onComenzar}>
+          Comenzar preparación
+        </button>
+      )}
+
+      {pedido.estado === ESTADOS.EN_PREPARACION && (
+        <div className="space-y-3">
+          <div className="card">
+            <div className="subsection-title">
+              <span>{lite ? "Preparación (modo LITE)" : "Preparación (escaneo)"}</span>
+              <span className="muted">
+                {lite
+                  ? `${checkedCount}/${totalProductos}`
+                  : `${(pedido?.productos || []).reduce((a, it) => a + reqQty(it), 0)} / ${
+                      (pedido?.productos || []).reduce((a, it, i) => {
+                        const k = keyFor(it, i);
+                        const p = prep[k] || {};
+                        return a + Number(p.usarSueltas || 0) + Number(p.usarDePaquete || 0);
+                      }, 0)
+                    }`
+                }
+              </span>
+            </div>
+
+            <div className="subsection-body space-y-3">
+              {/* --------- LITE --------- */}
+              {lite && (
+                <>
+                  <div className="product-grid">
+                    {(pedido?.productos || []).map((it, i) => {
+                      const qty = reqQty(it);
+                      const raw = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
+                      const uru = toURUCode(raw);
+                      const cat = catalogoMap[uru] || {};
+                      const customer = cat?.customerNo || cat?.customer_no || "—";
+                      const color = cat?.finish || cat?.color || "—";
+                      const k = keyFor(it, i);
+                      const checked = !!checks[k];
+                      return (
+                        <div key={k} className="card product-card">
+                          <div className="product-heading">
+                            <span className="product-customer">{customer}</span>
+                            <span className="product-color">{color}</span>
+                            <span className="pill" style={{ marginLeft: "auto" }}>x{qty}</span>
+                            <label className="ml-2 flex items-center">
+                              <input
+                                type="checkbox"
+                                className="checkbox"
+                                checked={checked}
+                                onChange={() => toggleCheck(k)}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button className="btn btn--outline flex-1" onClick={marcarTodo}>Marcar todo</button>
+                    <button
+                      className="btn flex-1 bg-black text-white disabled:opacity-60"
+                      onClick={onFinalizarLite}
+                      disabled={!allChecked}
+                    >
+                      Finalizar preparación
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* --------- COMPLETO (ESCÁNER) --------- */}
+              {!lite && (
+                <>
+                  <div className="space-y-2">
+                    {(pedido?.productos || []).map((it, i) => {
+                      const k = keyFor(it, i);
+                      const need = reqQty(it);
+                      const raw = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
+                      const uru = toURUCode(raw);
+                      const cat = catalogoMap[uru] || {};
+                      const customer = cat?.customerNo || cat?.customer_no || "—";
+                      const color = cat?.finish || cat?.color || "—";
+
+                      const p = prep[k] || { stock: 0, usarSueltas: 0, paquete: null, usarDePaquete: 0 };
+                      const usados = (p.usarSueltas || 0) + (p.usarDePaquete || 0);
+                      const ok = usados >= need && need > 0;
+
+                      const setP = (changes) =>
+                        setPrep(prev => ({ ...prev, [k]: { ...(prev[k] || {}), ...changes } }));
+
+                      return (
+                        <div key={k} className="card product-card">
+                          {/* Header compacto */}
+                          <div className="product-card__head">
+                            <div className="product-card__title">
+                              <span className="product-card__sku">{customer}</span>
+                              <span className="product-card__color">{color}</span>
+                            </div>
+                            <div className="product-card__chips">
+                              <span className="chip chip--muted">Req: {need}</span>
+                              <span className={`chip ${ok ? "chip--ok" : ""}`}>Usado: {usados}</span>
+                            </div>
+                          </div>
+
+                          {/* Meta breve */}
+                          <div className="product-card__meta">
+                            <span className="meta-pill">
+                              Sueltas: <strong>{Number(p.stock || 0)}</strong>
+                            </span>
+                            <span className="meta-pill">
+                              Pack: <strong>{p.paquete?.packSize ? `x${p.paquete.packSize}` : "—"}</strong>
+                            </span>
+                          </div>
+
+                          {/* Cantidades — sueltas */}
+                          <div className="qty-row">
+                            <span className="qty-row__label">Sueltas</span>
+                            <div className="qty">
+                              <button
+                                type="button"
+                                className="qty__btn"
+                                aria-label="Quitar tira suelta"
+                                onClick={() =>
+                                  setPrep(prev => {
+                                    const cur = prev[k] || {};
+                                    const val = Math.max(0, Number(cur.usarSueltas || 0) - 1);
+                                    return { ...prev, [k]: { ...cur, usarSueltas: val } };
+                                  })
+                                }
+                                disabled={Number(p.usarSueltas || 0) <= 0}
+                              >−</button>
+                              <span className="qty__val">{Number(p.usarSueltas || 0)}</span>
+                              <button
+                                type="button"
+                                className="qty__btn"
+                                aria-label="Agregar tira suelta"
+                                onClick={() =>
+                                  setPrep(prev => {
+                                    const cur = prev[k] || {};
+                                    const stockSueltas = Number(cur.stock || 0);
+                                    const remaining = Math.max(0, need - Number(cur.usarDePaquete || 0));
+                                    const next = Math.min(
+                                      stockSueltas,
+                                      remaining,
+                                      Number(cur.usarSueltas || 0) + 1
+                                    );
+                                    return { ...prev, [k]: { ...cur, usarSueltas: next } };
+                                  })
+                                }
+                                disabled={(() => {
+                                  const stockSueltas = Number(p.stock || 0);
+                                  const remaining = Math.max(0, need - Number(p.usarDePaquete || 0));
+                                  return Number(p.usarSueltas || 0) >= Math.min(stockSueltas, remaining);
+                                })()}
+                              >+</button>
+                            </div>
+                          </div>
+
+                          {/* Cantidades — paquete (aparece solo si hay pack escaneado) */}
+                          {p.paquete ? (
+                            <div className="qty-row">
+                              <span className="qty-row__label">Paquete</span>
+                              <div className="qty">
+                                <button
+                                  type="button"
+                                  className="qty__btn"
+                                  aria-label="Quitar del paquete"
+                                  onClick={() =>
+                                    setPrep(prev => {
+                                      const cur = prev[k] || {};
+                                      const val = Math.max(0, Number(cur.usarDePaquete || 0) - 1);
+                                      return { ...prev, [k]: { ...cur, usarDePaquete: val } };
+                                    })
+                                  }
+                                  disabled={Number(p.usarDePaquete || 0) <= 0}
+                                >−</button>
+                                <span className="qty__val">{Number(p.usarDePaquete || 0)}</span>
+                                <button
+                                  type="button"
+                                  className="qty__btn"
+                                  aria-label="Agregar del paquete"
+                                  onClick={() =>
+                                    setPrep(prev => {
+                                      const cur = prev[k] || {};
+                                      const usedNow = Number(cur.usarSueltas || 0) + Number(cur.usarDePaquete || 0);
+                                      const remaining = Math.max(0, need - usedNow);
+                                      const packSize = Number(cur.paquete?.packSize || 0);
+                                      const roomInPack = Math.max(0, packSize - Number(cur.usarDePaquete || 0));
+                                      const stepAllowed = Math.min(remaining, roomInPack);
+                                      const val = Number(cur.usarDePaquete || 0) + (stepAllowed > 0 ? 1 : 0);
+                                      return {
+                                        ...prev,
+                                        [k]: { ...cur, usarDePaquete: Math.min(val, packSize) },
+                                      };
+                                    })
+                                  }
+                                  disabled={(() => {
+                                    const usedNow = Number(p.usarSueltas || 0) + Number(p.usarDePaquete || 0);
+                                    const remaining = Math.max(0, need - usedNow);
+                                    const packSize = Number(p.paquete?.packSize || 0);
+                                    const roomInPack = Math.max(0, packSize - Number(p.usarDePaquete || 0));
+                                    return remaining <= 0 || roomInPack <= 0;
+                                  })()}
+                                >+</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="qty-row qty-row--hint">
+                              <span className="qty-row__label">Paquete</span>
+                              <span className="hint">—</span>
+                            </div>
+                          )}
+
+                          {/* Siempre al fondo */}
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--full mt-2"
+                            onClick={() => setScanForKey(String(k))}
+                          >
+                            Escanear paquete
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn w-full bg-black text-white disabled:opacity-60"
+                    onClick={async () => {
+                      try {
+                        const items = (pedido?.productos || []).map((it, i) => {
+                          const k = keyFor(it, i);
+                          const raw = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
+                          const uru = toURUCode(raw);
+                          const p = prep[k] || {};
+                          return {
+                            codUru: uru,
+                            usadasSueltas: Number(p.usarSueltas || 0),
+                            paquete: p.paquete ? { packSize: Number(p.paquete.packSize || 0) } : null,
+                            usadasDePaquete: Number(p.usarDePaquete || 0),
+                            need: reqQty(it),
+                          };
+                        });
+
+                        const allOk = items.every(x => (x.usadasSueltas + x.usadasDePaquete) >= x.need);
+                        if (!allOk) { toast?.error?.("Te faltan tiras en uno o más productos"); return; }
+
+                        await confirmarPedidoConStock({
+                          pedidoId: pedido.id || pedidoId,
+                          usuarioId: user?.uid || "operario",
+                          items
+                        });
+
+                        await cambiarEstado(pedidoId, ESTADOS.PREPARADO);
+                        toast?.success?.("Pedido preparado");
+                      } catch (e) {
+                        console.error(e);
+                        toast?.error?.(e.message || "No se pudo confirmar la preparación");
+                      }
+                    }}
+                    disabled={
+                      !(pedido?.productos || []).every((it, i) => {
+                        const k = keyFor(it, i);
+                        const p = prep[k] || {};
+                        return (Number(p.usarSueltas || 0) + Number(p.usarDePaquete || 0)) >= reqQty(it);
+                      })
+                    }
+                  >
+                    Finalizar preparación
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pedido.estado === ESTADOS.PREPARADO && <p className="text-sm">Esperando control del Encargado…</p>}
+
+      {/* ================= Overlay ÚNICO (SIEMPRE ENCIMA) ================= */}
+      {overlayOpen && (
+        <div
+          className="overlay-fixed"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.62)",
+            zIndex: 9999,               // <<— ENSIMA DE TODO
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              maxHeight: "92vh",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 12,
+              boxShadow: "0 20px 50px rgba(0,0,0,.35)",
+              border: "1px solid rgba(0,0,0,.08)",
+            }}
+          >
+            <div className="subsection-title" style={{ position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
+              <span>
+                {scanForKey ? "Escanear paquete" : packError ? "Paquete incorrecto" : "Confirmar paquete"}
+              </span>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => { setScanForKey(null); setPackError(null); setPackConfirm(null); }}
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="p-3">
+              {/* === Cámara === */}
+              {scanForKey && !packConfirm && !packError && (
+                <>
+                  <QrScanner
+                    key={scanForKey}
+                    onScanSuccess={(payload) => onScanPaquete(payload)}
+                    onError={(err) => {
+                      console.error("[QR] error:", err);
+                      alert("No se pudo abrir la cámara.\nVerificá permisos/HTTPS o probá en móvil.");
+                    }}
+                  />
+                  <p className="text-xs text-gray-500 mt-2">
+                    Si la cámara no aparece, verificá HTTPS y permisos de cámara.
+                  </p>
+                </>
+              )}
+
+              {/* === Error === */}
+              {!scanForKey && packError && (
+                <div className="space-y-3">
+                  <div className="muted">Este paquete no corresponde al producto.</div>
+                  <div className="card" style={{ background: "#fafafa" }}>
+                    <div className="p-2 text-sm">
+                      <div><b>Esperado:</b> {packError.esperado}</div>
+                      <div><b>Escaneado:</b> {packError.qr}</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      className="btn btn--outline flex-1"
+                      onClick={() => setPackError(null)} // cierro error y dejo overlay porque podrías reabrir cámara
+                    >
+                      Entendido
+                    </button>
+                    <button
+                      className="btn flex-1"
+                      onClick={() => { setPackError(null); setScanForKey(String(packConfirm?.key || "")); }}
+                      disabled={!packConfirm?.key && !scanForKey}
+                    >
+                      Reintentar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* === Confirmación === */}
+              {!scanForKey && !packError && packConfirm && (
+                <ConfirmCard
+                  data={packConfirm}
+                  onCancel={() => setPackConfirm(null)}
+                  onConfirm={(qty) => {
+                    const k = packConfirm.key;
+                    setPrep((prev) => {
+                      const cur = prev[k] || {};
+                      const next = clampPrepForNeed(k, {
+                        ...cur,
+                        paquete: { packSize: Number(packConfirm.packSize || 0) },
+                        usarDePaquete: Math.max(Number(cur.usarDePaquete || 0), Number(qty || 0)),
+                      });
+                      return { ...prev, [k]: next };
+                    });
+                    setPackConfirm(null);
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ================== Card de Confirmación (auto-contenida) ==================
+function ConfirmCard({ data, onCancel, onConfirm }) {
+  const { nombre, packSize, remaining, defaultQty = 0 } = data || {};
+  const maxQty = Math.max(0, Math.min(Number(remaining || 0), Number(packSize || 0)));
+
+  const [qty, setQty] = useState(Math.min(defaultQty, maxQty));
+
+  // no hooks condicionales: este componente es siempre montado de forma directa por el padre
+  const dec = () => setQty((q) => Math.max(0, q - 1));
+  const inc = () => setQty((q) => Math.min(maxQty, q + 1));
+
+  return (
+    <div className="space-y-3">
+      <div className="card" style={{ background: "#fafafa" }}>
+        <div className="p-2 text-sm">
+          <div><b>{nombre || "Producto"}</b></div>
+          <div className="muted">El paquete trae <b>{packSize}</b> tiras</div>
+          <div className="muted">Te faltan <b>{remaining}</b> tiras</div>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <div className="muted">Seleccioná cuántas tiras retirar</div>
+        <div className="flex items-center gap-2">
+          <button className="btn btn--outline" onClick={dec} disabled={qty <= 0}>-</button>
+          <input
+            type="number"
+            className="input mono"
+            value={qty}
+            min={0}
+            max={maxQty}
+            onChange={(e) => {
+              const v = Number(e.target.value || 0);
+              const clamped = Math.max(0, Math.min(maxQty, v));
+              setQty(clamped);
+            }}
+            style={{ width: 90, textAlign: "center" }}
+          />
+          <button className="btn btn--outline" onClick={inc} disabled={qty >= maxQty}>+</button>
+        </div>
+        <div className="text-xs muted">Máximo permitido: {maxQty} (min(remaining, packSize))</div>
+      </div>
+
+      <div className="flex gap-2">
+        <button className="btn btn--ghost flex-1" onClick={onCancel}>Cancelar</button>
+        <button
+          className="btn flex-1"
+          onClick={() => onConfirm(qty)}
+          disabled={qty <= 0 || qty > maxQty}
+        >
+          Confirmar
+        </button>
+      </div>
     </div>
   );
 }

@@ -21,8 +21,10 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "test": "vitest",
+    "eject": "react-scripts eject",
+    "test:watch":"vitest --watch", 
+    "test:ui":"vitest --ui"
   },
   "eslintConfig": {
     "extends": [
@@ -41,5 +43,11 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "devDependencies": {
+    "@vitest/ui": "^3.2.4",
+    "vitest": "^3.2.4"
   }
 }
+
+

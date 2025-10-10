@@ -59,16 +59,21 @@ export default function Despacho() {
 
       <div style={{ marginBottom: 20, width: "100%", maxWidth: 400 }}>
         <QrScanner
-          onScanSuccess={(data) => {
-            const cantidadTotal = parseInt(data.cantidad, 10);
-            if (!cantidadTotal || cantidadTotal <= 0) {
-              alert("❌ El paquete no tiene una cantidad válida.");
+          onScan={(qr) => {
+            // qr = { codigo, cantidad|null, nroPaquete|null }
+            let cantidadTotal = Number(qr.cantidad);
+            if (!Number.isFinite(cantidadTotal) || cantidadTotal <= 0) {
+              const inp = prompt(`📦 ¿Cuántas tiras tiene este paquete de ${qr.codigo}?`);
+              cantidadTotal = Number(inp);
+            }
+            if (!Number.isFinite(cantidadTotal) || cantidadTotal <= 0) {
+              alert("❌ Cantidad inválida.");
               return;
             }
 
-            const pedidas = pedidoSeleccionado.items.find(i => i.productoCodigo === data.codigo_urualum)?.cantidadPendiente || 0;
-            const yaPreparadas = tirasManual[data.codigo_urualum] || 0;
-            const faltanEntregar = pedidas - yaPreparadas;
+            const pedidas = pedidoSeleccionado.items.find(i => i.productoCodigo === qr.codigo)?.cantidadPendiente || 0;
+            const yaPreparadas = tirasManual[qr.codigo] || 0;
+            const faltanEntregar = Math.max(0, pedidas - yaPreparadas);
 
             if (faltanEntregar <= 0) {
               alert("⚠️ Ya se completó la cantidad requerida de este producto.");
@@ -76,26 +81,26 @@ export default function Despacho() {
             }
 
             const maxPermitido = Math.min(cantidadTotal, faltanEntregar);
+            const cantidadUsada = Number(prompt(
+              `📦 El paquete tiene ${cantidadTotal} tiras.\n📦 El pedido requiere: ${faltanEntregar}\n\n¿Cuántas querés usar? (Máximo: ${maxPermitido})`
+            ));
 
-            const cantidadUsada = parseInt(prompt(
-              `📦 El paquete tiene ${cantidadTotal} tiras.\n📦 El pedido requiere: ${faltanEntregar}\n\n¿Cuántas querés usar? (Máximo permitido: ${maxPermitido})`
-            ), 10);
-
-            if (!cantidadUsada || cantidadUsada < 1 || cantidadUsada > maxPermitido) {
+            if (!Number.isFinite(cantidadUsada) || cantidadUsada < 1 || cantidadUsada > maxPermitido) {
               alert(`⚠️ Cantidad inválida. Debe ser entre 1 y ${maxPermitido}`);
               return;
             }
 
-            agregarTirasSueltas(data.codigo_urualum, cantidadUsada);
+            agregarTirasSueltas(qr.codigo, cantidadUsada);
 
             const remanenteFinal = cantidadTotal - cantidadUsada;
             if (remanenteFinal > 0) {
-              agregarTirasAlStockVirtual(data.codigo_urualum, remanenteFinal, data.nro_paquete);
+              agregarTirasAlStockVirtual(qr.codigo, remanenteFinal, qr.nroPaquete || null);
             }
 
-            alert(`✅ Se usaron ${cantidadUsada} tiras. ${remanenteFinal > 0 ? `Se guardaron ${remanenteFinal} como sueltas.` : ''}`);
+            alert(`✅ Se usaron ${cantidadUsada} tiras. ${remanenteFinal > 0 ? `Se guardaron ${remanenteFinal} como sueltas.` : ""}`);
           }}
         />
+
       </div>
 
       <h3>Resumen por producto:</h3>

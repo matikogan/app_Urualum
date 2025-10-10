@@ -2,6 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getFunctions} from "firebase/functions";
 
 // ⚠️ Reemplazá estos valores con los tuyos
 const firebaseConfig = {
@@ -14,8 +15,12 @@ const firebaseConfig = {
 };
 // Inicializa Firebase
 const app = initializeApp(firebaseConfig);
+console.log("[firebase.js] init projectId:", app.options.projectId, "app name:", app.name);
 
 // Exportá la instancia de Firestore
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+// NUEVO: exportar Functions (ajustá la región si usás otra)
+export const functions = getFunctions(app, "us-central1");
+

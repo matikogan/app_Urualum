@@ -377,3 +377,343 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 }
 .factura-heading { font-weight:700; font-size:16px; color: var(--brand); }
 .factura-sub { font-size:13px; color: var(--ink-2); margin-top:2px; }
+
+
+/* Encabezado: título + depósito */
+.deck-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin: 8px 0 12px;
+}
+.deck-title { font-size: 22px; font-weight: 800; }
+.pill--brand { background: #eef4fb; color: var(--brand); }
+
+/* Filtros top */
+.filters { margin-bottom: 12px; }
+.filters-row { display: grid; gap: 10px; }
+@media (min-width: 700px) {
+  .filters-row { grid-template-columns: 2fr 1fr; }
+}
+
+/* Secciones (Estados y Buckets) plegables */
+.section { margin: 6px 0 10px; }
+.section-title {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  background: #fff; border: 1px solid #e9eef5; border-radius: 12px;
+  padding: 10px 12px; font-weight: 700; cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.section-title .muted { margin-left: 8px; }
+.chev { font-size: 18px; transform: rotate(0deg); transition: transform .15s ease; }
+.chev--up { transform: rotate(180deg); }
+
+/* Grid de cards de pedidos */
+.orders-grid { display: grid; gap: 12px; margin-top: 10px; }
+@media (min-width: 900px) { .orders-grid { grid-template-columns: 1fr 1fr; } }
+
+.order-card { padding: 14px; }
+.order-head { display:flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.order-number { font-weight: 800; font-size: 16px; color: var(--ink); }
+
+/* Cuerpo con 3 columnas en desktop */
+.order-body {
+  display: grid; gap: 6px 12px; margin: 6px 0 10px;
+}
+@media (min-width: 700px) {
+  .order-body { grid-template-columns: 1fr 1fr 1fr; }
+}
+
+.order-field { display:flex; flex-direction: column; }
+.order-label { font-size: 12px; font-weight: 700; letter-spacing: .2px; color: var(--ink-2); text-transform: uppercase; }
+.order-value { font-size: 14px; color: var(--ink); }
+
+/* Acciones */
+.order-actions { display: flex; gap: 10px; justify-content: center; }
+
+/* Pills de método (ya usadas) */
+.pill--info { background:#e9f2ff; color:#1e5bb8; }
+.pill--ok { background:#e7f5ec; color:#2e7d32; }
+.pill--warn { background:#fff7e0; color:#a37500; }
+
+
+/* ===== Jerarquía Estados → Fechas ===== */
+.section--state {
+  margin-top: 14px;
+}
+
+.section-title--state {
+  font-size: 1rem;        /* título más grande que el de fecha */
+  font-weight: 600;
+}
+
+.section-children {
+  margin-top: 6px;
+  margin-left: 12px;          /* sangría visual */
+  padding-left: 12px;
+  border-left: 2px dashed var(--line, #E5E7EB); /* guía vertical */
+}
+
+/* Buckets de fecha (subsecciones) */
+.subsection {
+  margin: 8px 0 12px;
+}
+
+.subsection-title {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--card-muted, #F7F7FA); /* un pelín más claro que section */
+  border: 1px solid var(--line, #E5E7EB);
+  font-size: 0.92rem;      /* más chico que el de estado */
+  font-weight: 500;
+}
+
+.subsection-title .muted {
+  margin-left: auto;
+}
+
+.chev.chev--sm {
+  font-size: 0.9em;
+  opacity: .7;
+}
+
+/* Cuerpo del bucket */
+.subsection-body {
+  padding: 10px 12px 4px 12px;
+}
+
+/* Grid de pedidos dentro del bucket:
+   reducimos el gap para dar sensación de “nivel inferior” */
+.subsection-body .orders-grid {
+  gap: 10px;
+}
+
+/* opcional en styles.css, si no existe ya */
+.order-card.card--selectable { cursor: pointer; }
+.order-card.card--selectable:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,.06); }
+
+
+/* ===== Botonera de métodos (misma medida, centrados) ===== */
+.methods-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); /* móvil: 2x2 */
+  justify-items: center;
+}
+.methods-grid .btn {
+  width: 100%;                /* todas iguales */
+  justify-content: center;    /* texto centrado */
+}
+@media (min-width: 720px) {
+  .methods-grid { grid-template-columns: repeat(4, 1fr); } /* desktop: 4 en línea */
+}
+
+/* Margen entre buscador y botones */
+.filters .filters-row + .filters-row { margin-top: 10px; }
+
+/* ===== Colores por ESTADO (borde + leve fondo) ===== */
+.state--pendiente .section-title--state {
+  border-color: #ffe29a;              /* ámbar suave */
+  background: #fff9e6;
+  border-left: 4px solid #ffc64d;
+}
+.state--preparacion .section-title--state {
+  border-color: #b3d4ff;              /* azul suave */
+  background: #f3f9ff;
+  border-left: 4px solid #6ea8ff;
+}
+
+/* ===== Colores por ESTADO (borde + leve fondo) ===== */
+.state--pendiente .section-title--state {
+  border-color: #ffd1d1; background: #fff4f4; border-left: 4px solid #ff4d4d; /* rojo */
+}
+.state--asignado .section-title--state {
+  border-color: #ffe0bf; background: #fff7ec; border-left: 4px solid #ff9a3c; /* naranja */
+}
+.state--preparacion .section-title--state {
+  border-color: #fff2bf; background: #fffbeb; border-left: 4px solid #ffcc33; /* amarillo */
+}
+.state--preparado .section-title--state {
+  border-color: #c7f0d5; background: #f2fbf6; border-left: 4px solid #34c759; /* verde */
+}
+.state--controlado .section-title--state {
+  border-color: #cfe3ff; background: #f2f7ff; border-left: 4px solid #3b82f6; /* azul */
+}
+.state--despachado .section-title--state {
+  border-color: #ffd1e6; background: #fff2f8; border-left: 4px solid #ff6fb2; /* rosa */
+}
+
+
+/* ===== Tarjetas de pedido: borde y sombra sutil ===== */
+.order-card {
+  border: 1px solid #e2e6eb;          /* borde mínimo */
+  box-shadow: 0 2px 10px rgba(0,0,0,.04); /* sombra suave */
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.order-card * {
+  text-decoration: none;   /* por si algún hijo hereda el subrayado */
+}
+
+/* (opcional) dar feedback sutil de click */
+.order-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(0,0,0,.08);
+}
+
+/* (opcional) si querés subrayar SOLO el número al hover */
+.order-card:hover .order-number {
+  text-decoration: underline;
+}
+
+.order-card.card--selectable:hover {
+  box-shadow: 0 6px 18px rgba(0,0,0,.08); /* un pelín más al hover */
+}
+
+
+/* opcional si no existe */
+.chip--selectable { background:#f4f4f5; border:1px solid #e5e7eb; }
+.chip--selected   { background:#111; color:#fff; border:1px solid #111; }
+
+/* Opcional: look unificado para selects en mobile */
+select.w-full.border.rounded {
+  background-color: #fff;
+  appearance: none;          /* iOS/Android mantienen el picker igual */
+}
+
+
+.checkbox { width: 20px; height: 20px; }
+
+.card.block { transition: box-shadow .15s ease, transform .05s ease; }
+.card.block:active { transform: scale(0.995); }
+
+
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.modal-card {
+  width: 100%; max-width: 480px;
+  background: #fff; border-radius: 16px; padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+
+/* ====== Product card compacta para móvil ====== */
+.product-card { padding: 12px; }
+.product-card__head {
+  display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px;
+}
+.product-card__title { display: flex; gap: 8px; align-items: baseline; }
+.product-card__sku { font-weight: 800; font-size: 18px; letter-spacing: .2px; }
+.product-card__color { color: var(--ink-2); font-weight: 700; }
+.product-card__chips { margin-left: auto; display: flex; gap: 6px; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #eef1f4; color: #39424e; border-radius: 999px;
+  padding: 2px 8px; font-size: 12px; font-weight: 600;
+}
+.chip--ok { background: #e8f7ef; color: #1f7a53; }
+.chip--muted { background: #f1f2f4; color: #637381; }
+
+.product-card__meta {
+  display: flex; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;
+}
+.meta-pill {
+  background: #f6f7f9; border-radius: 8px; padding: 2px 8px;
+  font-size: 12px; color: #667085;
+}
+
+/* ====== Fila de cantidad (horizontal) ====== */
+.qty-row {
+  display: grid; grid-template-columns: 1fr auto; align-items: center;
+  padding: 6px 0; border-top: 1px dashed #edf0f3;
+}
+.qty-row:first-of-type { border-top: 0; }
+.qty-row__label {
+  font-size: 13px; font-weight: 700; color: #232b36;
+}
+.qty-row--hint .hint { color: #98a2b3; font-size: 13px; }
+
+/* Control +  número + - en una sola píldora */
+.qty {
+  display: inline-flex; align-items: center; background: #fff;
+  border: 1px solid #dfe3e8; border-radius: 999px;
+  padding: 2px; gap: 2px;
+}
+.qty__btn {
+  appearance: none; border: 0; background: #eef2f6;
+  width: 34px; height: 34px; border-radius: 999px;
+  font-size: 18px; line-height: 1; font-weight: 800; color: #1f2937;
+}
+.qty__btn:disabled { opacity: .4; }
+.qty__val {
+  min-width: 34px; text-align: center; font-variant-numeric: tabular-nums;
+  font-weight: 800; color: #111827;
+}
+
+/* Botón full-width sutil */
+.btn--full { width: 100%; }
+
+
+.qty-row { display:flex; align-items:center; gap:8px; }
+.qty-row .qty-value { min-width:28px; text-align:center; }
+
+.btn-sm { padding:6px 10px; font-size:14px; }
+.w-full { width:100%; }
+.space-y-2 > * + * { margin-top: .5rem; }
+
+
+.searchbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.searchbar__input {
+  width: 100%;
+  padding: 10px 36px 10px 40px;
+  border: 1px solid var(--ink-2, #d0d0d0);
+  border-radius: 12px;
+  outline: none;
+  background: #fff;
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+
+.searchbar__input:focus {
+  border-color: var(--brand, #1c6ec4);
+  box-shadow: 0 0 0 3px rgba(28, 110, 196, 0.12);
+}
+
+.searchbar__icon {
+  position: absolute;
+  left: 12px;
+  font-size: 16px;
+  opacity: .5;
+  pointer-events: none;
+}
+
+.searchbar__clear {
+  position: absolute;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 0;
+  background: #f2f2f2;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.searchbar__clear:hover {
+  background: #e9e9e9;
+}

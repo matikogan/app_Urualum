@@ -1,0 +1,289 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================
+    // Helpers de usuario
+    // =========================
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    function isAuthed() {
+      return request.auth != null;
+    }
+    function userRole() {
+      return userDoc().data.role;
+    }
+    function userDeposito() {
+      return userDoc().data.deposito;
+    }
+    function isVentas() {
+      return userRole() == "ventas";
+    }
+    function isEncargado() {
+      return userRole() == "encargado";
+    }
+    function isOperario() {
+      return userRole() == "operario";
+    }
+
+    // =========================
+    // users: cada usuario puede leer su propio doc
+    // (requisito para que las reglas de /pedidos puedan evaluar rol/depósito)
+    // =========================
+    match /users/{uid} {
+      // leer tu propio doc  OR  (encargado/ventas leyendo operarios de su depósito)
+      allow read: if isAuthed() && (
+        request.auth.uid == uid ||
+        (
+          (isEncargado() || isVentas()) &&
+          resource.data.role == "operario" &&
+          resource.data.deposito == userDeposito()
+        )
+      );
+
+      allow create: if isAuthed() && request.auth.uid == uid;
+      allow update: if isAuthed() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // === CONFIG / FEATURE FLAGS ===
+    // Permite leer cualquier documento de la colección `config` si está autenticado.
+    // (ej.: /config/app, /config/flags, etc.)
+    match /config/{docId} {
+      allow read: if isAuthed();
+      allow write: if false;
+    }
+
+
+    // === Catálogo de productos ===
+    // Permitir leer a usuarios autenticados
+    match /catalogoProductos/{id} {
+      allow read: if isAuthed();
+      allow write: if false;
+    }
+
+
+    // === STOCK DE TIRAS SUELTAS ===
+    match /stock_tiras/{codUru} {
+      // Leer: cualquier usuario autenticado (puede ser útil para UI)
+      allow read: if isAuthed();
+
+      // Escribir: solo operario o encargado
+      // Validamos que únicamente se escriba el campo "piezas", sea número, y no negativo.
+      allow create, update: if (isOperario() || isEncargado())
+        && request.resource.data.keys().hasOnly(['piezas'])
+        && request.resource.data.piezas is number
+        && request.resource.data.piezas >= 0;
+
+      // No se borra desde cliente
+      allow delete: if false;
+    }
+
+    // === MOVIMIENTOS DE STOCK DE TIRAS ===
+    match /stock_tiras_mov/{movId} {
+      // Leer: cualquier usuario autenticado (útil para auditorías en la UI)
+      allow read: if isAuthed();
+
+      // Crear: operario o encargado.
+      // Validamos shape básico del movimiento.
+      //  - ts: puede venir como serverTimestamp (no forzamos validación estricta)
+      //  - codUru: string
+      //  - tipo: 'consumo' | 'alta_remanente' | 'paquete_abierto'
+      //  - delta: número (opcional en 'paquete_abierto', requerido en los otros)
+      //  - pedidoId: string
+      //  - usuarioId: debe ser el usuario que escribe
+      allow create: if (isOperario() || isEncargado())
+        && request.resource.data.codUru is string
+        && request.resource.data.tipo in ['consumo', 'alta_remanente', 'paquete_abierto']
+        && request.resource.data.pedidoId is string
+        && request.resource.data.usuarioId == request.auth.uid
+        && (
+            // en 'consumo' y 'alta_remanente' esperamos delta numérico (negativo o positivo)
+            ((request.resource.data.tipo in ['consumo','alta_remanente'])
+              && request.resource.data.delta is number)
+            ||
+            // en 'paquete_abierto' permitimos que no haya delta y sí campos packSize/usadas/remanente
+            (request.resource.data.tipo == 'paquete_abierto')
+          );
+
+      // No se editan ni borran movimientos desde cliente
+      allow update, delete: if false;
+    }
+
+    match /paquetes_abiertos/{id} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null;
+      allow update, delete: if false;
+    }
+
+
+    // =========================
+    // pedidos
+    // =========================
+    /* match /pedidos/{id} {
+
+      // ---- Lectura por rol
+      allow read: if isAuthed() && (
+          isVentas() ||
+          (isEncargado() && resource.data.deposito == userDeposito()) ||
+          (isOperario() && resource.data.operarioId == request.auth.uid)
+      );
+
+      // ---- Escritura (solo campos operativos)
+      // Campos que SÍ pueden cambiar desde cliente:
+      //   estado, operarioId, operarioNombre, updatedAt, timestamps
+      function onlyOperationalFieldsChanged() {
+        // permite únicamente modificaciones en estos campos
+        return request.resource.data.diff(resource.data).changedKeys()
+               .hasOnly(['estado', 'operarioId', 'operarioNombre', 'updatedAt', 'timestamps']);
+      }
+
+      // Validaciones de estado por rol
+      function estadoNuevo() {
+        return request.resource.data.estado;
+      }
+
+      // Encargado: en su depósito puede asignar/quitar operario y mover estado
+      function canEncargadoUpdate() {
+        return isEncargado()
+          && resource.data.deposito == userDeposito()
+          && onlyOperationalFieldsChanged();
+      }
+
+      // Operario: solo sus pedidos, y solo mover a EN_PREPARACION / PREPARADO
+      function canOperarioUpdate() {
+        return isOperario()
+          && resource.data.operarioId == request.auth.uid
+          && onlyOperationalFieldsChanged()
+          && (estadoNuevo() == "EN_PREPARACION" || estadoNuevo() == "PREPARADO");
+      }
+
+      // Ventas: puede marcar DESPACHADO
+      function canVentasUpdate() {
+        return isVentas()
+          && onlyOperationalFieldsChanged()
+          && estadoNuevo() == "DESPACHADO";
+      }
+
+      allow update: if isAuthed() && (
+        canEncargadoUpdate() || canOperarioUpdate() || canVentasUpdate()
+      );
+
+      // La creación/eliminación de pedidos la hace la sincronización (server/función).
+      allow create, delete: if false;
+    } */
+
+    // PEDIDOS — Paso 1
+    // === PEDIDOS (lectura por rol; escritura separada para "sync" y "operacional") ===
+    match /pedidos/{id} {
+      // ---- LECTURA por rol (ventas todo; encargado su depósito; operario asignado)
+      allow read: if request.auth != null && (
+        userDoc().data.role == "ventas" ||
+        (userDoc().data.role == "encargado" && resource.data.deposito == userDoc().data.deposito) ||
+        (userDoc().data.role == "operario" && resource.data.operarioId == request.auth.uid)
+      );
+
+      // ---- CREATE desde SYNC (Finnegans) — SOLO encargado/ventas con flag de origen
+      allow create: if request.auth != null
+        && request.resource.data.source == "finnegans"
+        && (userDoc().data.role == "encargado" || userDoc().data.role == "ventas");
+
+      // ===== Helpers locales para UPDATE =====
+      function changedKeys() {
+        return request.resource.data.diff(resource.data).changedKeys();
+      }
+      function nuevoEstado() { return request.resource.data.estado; }
+      function estadoAnterior() { return resource.data.estado; }
+
+      // Campos operativos “clásicos”
+      function onlyOperationalFieldsChanged() {
+        return changedKeys().hasOnly([
+          'estado','operarioId','operarioNombre','updatedAt','timestamps'
+        ]);
+      }
+
+      // >>> NUEVO: Campos permitidos para DESPACHO por VENTAS
+      // Permitimos además escribir: finnegans/*, despachadoAt, despachadoPor
+      function onlyDespatchFieldsChanged() {
+        return changedKeys().hasOnly([
+          'estado','finnegans','despachadoAt','despachadoPor','updatedAt','timestamps'
+        ]);
+      }
+
+      // >>> NUEVO: Regla de transición estricta CONTROLADO → DESPACHADO + autoría
+      function isValidVentasDespatch() {
+        return userDoc().data.role == "ventas"
+          && estadoAnterior() == "CONTROLADO"
+          && nuevoEstado() == "DESPACHADO"
+          && onlyDespatchFieldsChanged()
+          && request.resource.data.despachadoPor == request.auth.uid;
+          // Nota: no forzamos tipo de despachadoAt porque suele ser serverTimestamp()
+      }
+
+      // UPDATE: combinamos SYNC, Encargado, Operario y Ventas-Despacho
+      allow update: if request.auth != null && (
+        // (A) SYNC (Finnegans) — mantiene tu flujo actual por flag de origen
+        (
+          request.resource.data.source == "finnegans" &&
+          (userDoc().data.role == "encargado" || userDoc().data.role == "ventas")
+        )
+        ||
+        // (B.1) Encargado: cambios operativos en su depósito
+        (
+          userDoc().data.role == "encargado" &&
+          resource.data.deposito == userDoc().data.deposito &&
+          onlyOperationalFieldsChanged()
+        )
+        ||
+        // (B.2) Operario: solo sus pedidos y solo EN_PREPARACION o PREPARADO
+        (
+          userDoc().data.role == "operario" &&
+          resource.data.operarioId == request.auth.uid &&
+          onlyOperationalFieldsChanged() &&
+          (nuevoEstado() == "EN_PREPARACION" || nuevoEstado() == "PREPARADO")
+        )
+        ||
+        // (B.3) VENTAS — DESPACHO (CONTROLADO → DESPACHADO + metacampos permitidos)
+        isValidVentasDespatch()
+      );
+
+      // Nunca borrar desde cliente
+      allow delete: if false;
+    }
+
+
+
+    match /errores_preparacion/{docId} {
+    // Leer: encargado y ventas
+    allow read: if isAuthed() && (isEncargado() || isVentas());
+
+    // Crear: encargado (del depósito) u operario asignado al pedido
+    allow create: if isAuthed() && (
+      isEncargado() || isOperario()
+    );
+    // opcional: validar campos mínimos y tamaños; lo hacemos si querés después
+    allow update, delete: if false;
+  }
+
+
+
+  
+
+
+
+
+    // =========================
+    // (Opcional) Bloque de prueba — dejar cerrado o eliminar
+    // =========================
+    match /test_read/{docId} {
+      allow read: if isAuthed();   // si querés, ciérralo a false o bórralo
+      allow write: if false;
+    }
+
+    // Por defecto, denegar todo lo no especificado
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
