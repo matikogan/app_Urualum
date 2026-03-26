@@ -97,8 +97,9 @@ export default function Carrito() {
 
             // Guardamos en Firebase con trazabilidad
             await setDoc(doc(db, "pedidos_web", String(idFinnegans)), {
-                clienteId: clienteActivo ? "VENDEDOR_APP" : profile.id, // Auditoría
-                creadoPorVendedor: clienteActivo ? profile.email : null, // Quién lo armó
+                clienteId: clienteActivo ? "VENDEDOR_APP" : profile.id,
+                clienteFinnegansId: codigoFinal, // usado por MisPedidos para filtrar
+                creadoPorVendedor: clienteActivo ? profile.email : null,
                 clienteNombre: nombreFinal,
                 finnegansId: idFinnegans,
                 fecha: serverTimestamp(),

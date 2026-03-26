@@ -17,11 +17,11 @@ export default function MisPedidos() {
   const [mostrarLista, setMostrarLista] = useState(false);
 
   useEffect(() => {
-    if (!profile?.id) return;
+    if (!profile?.finnegansClienteCodigo) return;
 
     const q = query(
-        collection(db, "pedidos_web"), 
-        where("clienteId", "==", profile.id),
+        collection(db, "pedidos_web"),
+        where("clienteFinnegansId", "==", profile.finnegansClienteCodigo),
         orderBy("fecha", "desc")
     );
 
