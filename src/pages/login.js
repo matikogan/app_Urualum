@@ -39,19 +39,51 @@ export default function Login() {
   };
 
   return (
-    <div style={{ padding: 20, maxWidth: 360 }}>
-      <h2>Ingresar</h2>
-      <form onSubmit={onSubmit}>
-        <input placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} />
-        <input placeholder="Contraseña" type="password" value={pass} onChange={e=>setPass(e.target.value)} />
-        <button type="submit">Entrar</button>
-      </form>
+    <div className="login-page">
+      <div className="login-card">
 
-      <div style={{ margin: "12px 0" }}>
-        <button onClick={onGoogle}>Continuar con Google</button>
+        <img
+          src="/logo-urualum.png"
+          alt="Urualum"
+          className="login-logo"
+        />
+
+
+        <h2 className="login-title">Ingresar</h2>
+
+        <form className="login-form" onSubmit={onSubmit}>
+          <input
+            className="login-input"
+            placeholder="Email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+          />
+
+          <input
+            className="login-input"
+            placeholder="Contraseña"
+            type="password"
+            value={pass}
+            onChange={e => setPass(e.target.value)}
+          />
+
+          <button className="btn btn-primary btn-full" type="submit">
+            Entrar
+          </button>
+        </form>
+
+        <div className="login-separator">o</div>
+
+        <button
+          className="btn btn-outline btn-full"
+          onClick={onGoogle}
+        >
+          Continuar con Google
+        </button>
+
+        {err && <p className="login-error">{err}</p>}
       </div>
-      
-      {err && <p style={{color:"crimson"}}>{err}</p>}
     </div>
   );
+
 }

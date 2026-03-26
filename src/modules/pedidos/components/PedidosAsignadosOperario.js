@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listenPedidosAsignadosOperario } from "../services/pedidosFS";
 import { agruparPorEstadoYFecha, ordenarEstados } from "../services/agrupaciones";
 import { useAuth } from "../../../context/AuthContext";
 import { useApp } from "../../../context/AppContext";
 import { Link } from "react-router-dom";
+import Badge from "./Badge";
+import useNotificationSound from "hooks/useNotificationSound";
 
 // Estados visibles para operario
 const ESTADOS_VISIBLES = new Set(["ASIGNADO", "EN_PREPARACION"]);
@@ -28,6 +30,14 @@ export default function PedidosAsignadosOperario() {
   const [pedidos, setPedidos] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const [badges, setBadges] = useState({}); // { [ESTADO]: número }
+  const prevAllIdsRef = useRef(new Set());   // IDs vistos en el snapshot anterior (de ESTA vista)
+  const firstSnapRef = useRef(true);         // NO contar la primera foto
+  const lastChangeWasNewRef = useRef(false); // para evitar dobles incrementos si tenés otro efecto
+
+  // (opcional) sonido
+  const { soundOn, playNotif } = useNotificationSound("/sfx/new-order.mp3")
+
   useEffect(() => {
     if (!user?.uid) return;
     setLoading(true);
@@ -40,6 +50,38 @@ export default function PedidosAsignadosOperario() {
         const filtrados = arr.filter(p => ESTADOS_VISIBLES.has(String(p.estado || "").toUpperCase()));
         setPedidos(filtrados);
         setLoading(false);
+
+         // === NUEVOS PARA LA VISTA (IDs que antes no estaban en esta página) ===
+        const currentIds = new Set(filtrados.map(p => p.id));
+        const newOnes = [];
+
+        if (!firstSnapRef.current) {
+          for (const p of filtrados) {
+            if (!prevAllIdsRef.current.has(p.id)) newOnes.push(p);
+          }
+        } else {
+          firstSnapRef.current = false; // la primera foto no cuenta como nuevas
+        }
+
+        // actualizar ref para próxima comparación
+        prevAllIdsRef.current = currentIds;
+
+        if (newOnes.length > 0) {
+          lastChangeWasNewRef.current = true;
+          setBadges(prev => {
+            const next = { ...prev };
+            for (const p of newOnes) {
+              const est = String(p.estado || "").toUpperCase();
+              next[est] = (next[est] || 0) + 1;
+            }
+            return next;
+          });
+          // (opcional) sonido cuando llegan primeros asignados visibles para el operario
+          if (soundOn) playNotif();
+        } else {
+          lastChangeWasNewRef.current = false;
+        }
+
       },
       onError: (e) => {
         console.error(e);
@@ -50,6 +92,10 @@ export default function PedidosAsignadosOperario() {
 
     return () => unsub();
   }, [user?.uid, toast]);
+
+  function clearEstadoBadge(estado) {
+    setBadges(b => ({...b, [estado]: 0 }))
+  }
 
   const grupos = useMemo(() => agruparPorEstadoYFecha(pedidos), [pedidos]);
   const estadosOrdenados = useMemo(() => ordenarEstados(Object.keys(grupos)), [grupos]);
@@ -66,7 +112,14 @@ export default function PedidosAsignadosOperario() {
         const porFecha = grupos[estado];
         return (
           <section key={estado} className="mt-4">
-            <h2 className="font-bold">{estado}</h2>
+            <h2
+              className="font-bold estado-title"
+              style={{ position: "relative", display: "inline-block", cursor: "pointer" }}
+              onClick={() => setBadges(b => ({ ...b, [estado]: 0 }))}
+            >
+              <Badge count={badges?.[estado] || 0} />
+              {estado}
+            </h2>
             {Object.entries(porFecha).map(([bucket, items]) => (
               <div key={bucket}>
                 <h3 className="text-sm text-gray-500">{bucket}</h3>

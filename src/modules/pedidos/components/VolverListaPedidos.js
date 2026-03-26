@@ -1,5 +1,5 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 
 /**
@@ -13,21 +13,44 @@ import { useAuth } from "../../../context/AuthContext";
  *  - replace: boolean (default false)
  *  - state: any (obj opcional para pasar state en navigate)
  */
-export default function VolverListaPedidos({ to, label = "Volver a pedidos", replace = false, state }) {
+export default function VolverListaPedidos({ to, label = "Volver a pedidos", replace = false, state, fallbackBack = true, }) {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const location = useLocation();
+  const { profile } = useAuth() || {};
 
-  const defaultTo = React.useMemo(() => {
-    if (to) return to;
-    if (profile?.role === "Encargado") return "/pedidos";
-    if (profile?.role?.toLowerCase() === "operario") return "/pedidos-operario";
-    return "/pedidos"; // fallback seguro
-  }, [to, profile]);
+  // Deducción de ruta por rol si no vino `to`
+  const role = String(profile?.role || profile?.rol || "").toLowerCase();
+  const autoTo =
+    role === "encargado" || role === "admin"
+      ? "/pedidos"
+      : role === "operario"
+      ? "/pedidos-operario"
+      : "/pedidos";
+
+  const destino = to || autoTo;
+
+  const handleClick = (e) => {
+    e.preventDefault();
+
+    // Si ya estás parado en la ruta destino, hacé un replace para evitar push duplicado
+    if (location.pathname === destino) {
+      navigate(destino, { replace: true, state });
+      return;
+    }
+
+    try {
+      navigate(destino, { replace, state });
+    } catch {
+      // Como último recurso, volver atrás en el historial
+      if (fallbackBack) navigate(-1);
+    }
+  };
 
   return (
     <button
-      onClick={() => navigate(defaultTo, { replace, state })}
-      title="Volver a la lista de pedidos"
+      type="button"
+      onClick={handleClick}
+      className="btn btn--ghost"
       style={{
         display: "inline-flex",
         alignItems: "center",

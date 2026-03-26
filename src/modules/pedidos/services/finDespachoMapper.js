@@ -16,10 +16,10 @@ const DEPOSITO_EQUIV = {
   "RUTA-8": "RUTA8",
 
   // Isabela General
-  "ISABELA": "DEP2",
-  "ISABELA GENERAL": "DEP2",
-  "ISABELA_GENERAL": "DEP2",
-  "DEP2": "DEP2",         // por si ya viene el código correcto
+  "ISABELA": "ISABELA",
+  "ISABELA GENERAL": "ISABELA",
+  "ISABELA_GENERAL": "ISABELA",
+  "ISABELA": "ISABELA",         // por si ya viene el código correcto
 };
 
 function resolveDepositoCodigo(src) {

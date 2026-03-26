@@ -1,0 +1,56 @@
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
+import { db } from "../firebase";
+import { useAuth } from "../context/AuthContext";
+
+// 👇 AQUÍ ESTÁN LAS IMPORTACIONES CLAVE
+import PortalInicio from "../components/PortalInicio"; 
+import ListaPedidos from "../components/ListaPedidos";
+
+export default function MisPedidos() {
+  const navigate = useNavigate();
+  const { profile } = useAuth();
+  
+  const [pedidos, setPedidos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [mostrarLista, setMostrarLista] = useState(false);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+
+    const q = query(
+        collection(db, "pedidos_web"), 
+        where("clienteId", "==", profile.id),
+        orderBy("fecha", "desc")
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setPedidos(data);
+      setLoading(false);
+    });
+
+    return () => unsub();
+  }, [profile?.id]);
+
+  // Renderizado condicional limpio
+  if (mostrarLista) {
+    return (
+      <ListaPedidos 
+        pedidos={pedidos} 
+        loading={loading} 
+        onVolver={() => setMostrarLista(false)} 
+      />
+    );
+  }
+
+  return (
+    <PortalInicio 
+      onVerPedidos={() => setMostrarLista(true)} 
+      onCrearPedido={() => navigate("/catalogo")}
+      nombreUsuario={profile?.nombre || profile?.email}
+      cantidadPedidos={pedidos.length}
+    />
+  );
+}

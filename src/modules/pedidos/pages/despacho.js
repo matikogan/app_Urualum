@@ -4,6 +4,7 @@ import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { AppContext } from "context/AppContext";
 import QrScanner from "components/QrScanner";
 
+
 export default function Despacho() {
   const { id } = useParams();
   const location = useLocation();

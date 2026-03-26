@@ -1,24 +1,33 @@
+@import "react-datepicker/dist/react-datepicker.css";
+
 :root{
-  /* Paleta URUALUM */
-  --brand: #1c6ec4;
-  --brand-2: #77a8dc;
+/* Azul Urualum (extraído del logo) */
+  --brand: #1c6ec4; 
+  --brand-dark: #155294;
+  /* Grises Metálicos */
   --ink: #1e1e1c;
-  --ink-2: #787877;
-  --bg: #ffffff;
-  --bg-soft: #f5f7fb;
+  --bg-metal: #e2e6eb; /* Color aluminio */
+  --bg-soft: #f8fafc;
 
   /* Tipografía y layout */
   --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial;
   --radius: 14px;
   --radius-sm: 10px;
-  --shadow: 0 6px 24px rgba(0,0,0,.06);
   --space-1: 8px;  --space-2: 12px; --space-3: 16px; --space-4: 20px; --space-6: 28px;
+
+  /* Sombras más modernas */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.1);
+  --shadow-md: 0 4px 12px rgba(28, 110, 196, 0.08);
 
   /* Estados */
   --ok: #2e7d32;        /* verde */
   --warn: #f9a825;      /* amarillo */
   --error: #c62828;     /* rojo */
 }
+
+/* FIX: evita que inputs con padding/borde se salgan del contenedor */
+*, *::before, *::after { box-sizing: border-box; }
+
 
 html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); background: var(--bg); }
 
@@ -34,8 +43,17 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 .kpi { background: var(--bg-soft); border-radius: var(--radius-sm); padding: 6px 10px; }
 
 .btn {
-  appearance:none; border:0; border-radius: 12px; padding: 10px 14px; font-weight:600;
-  cursor:pointer; transition: transform .02s ease;
+  appearance: none; 
+  border: 0; 
+  border-radius: 12px; 
+  padding: 12px 14px; 
+  font-weight: 600;
+  cursor: pointer; 
+  transition: transform .02s ease;
+  margin: 0; /* Cambiado de 1rem a 0 para evitar desbordes */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .btn:active { transform: scale(.98); }
 
@@ -50,7 +68,7 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 }
 
 /* Pills de estado */
-.pill { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; font-weight:600; font-size:13px; }
+.pill { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; font-weight:600; }
 .pill--ok { background:#e7f5ec; color:var(--ok); }
 .pill--warn { background:#fff7e0; color:#a37500; }
 .pill--error{ background:#fdecea; color:var(--error); }
@@ -129,7 +147,6 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 
 /* Centrar vertical/horizontal el contenido debajo del topbar */
 .screen-center {
-  min-height: calc(100vh - 72px); /* ajustá 72px si tu topbar es más alto/bajo */
   display: grid;
   place-items: center;
 }
@@ -138,9 +155,8 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 .menu-buttons {
   display: flex;
   flex-direction: column;
-  gap: 50px;                 /* más separación */
+  gap: var(--space-3); /* Espacio exacto entre botones */
   width: 100%;
-  max-width: 360px;          /* ancho cómodo en móvil/tablet */
 }
 
 /* Botón grande y con presencia */
@@ -152,11 +168,16 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 
 /* Variante “outline” para el secundario: más contraste que el gris plano */
 .btn--outline {
-  background: #fff;
-  border: 2px solid var(--brand);
-  color: var(--brand);
+     background: var(--brand);
+    border: 2px solid #fff;
+    color: #fff; 
 }
-.btn--outline:hover { background: #f3f8ff; }
+
+.btn--outline:hover { 
+  background: #f3f8ff;
+  color: var(--brand);
+  border: 2px solid var(--brand);
+}
 
 /* Ícono dentro del botón (opcional) */
 .btn-icon { font-size: 20px; line-height: 0; margin-right: 10px; }
@@ -164,7 +185,8 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 .menu-buttons-center {
   min-height: calc(100vh - 300px); /* resta aprox topbar + título */
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
+  margin-top: 6rem;
   align-items: center;
   flex-direction: column;
   gap: 85px;
@@ -316,11 +338,13 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 
 /* Card compacta para factura seleccionada */
 .card--compact {
-  border: 1px solid #e2e6eb;
-  padding: 12px 16px;
-  border-radius: 10px;
-  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
   background: #fff;
+  border: 1px solid #e2e6eb;
+  padding: 10px 14px;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.02);
 }
 
 
@@ -397,7 +421,7 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 /* Secciones (Estados y Buckets) plegables */
 .section { margin: 6px 0 10px; }
 .section-title {
-  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   background: #fff; border: 1px solid #e9eef5; border-radius: 12px;
   padding: 10px 12px; font-weight: 700; cursor: pointer;
   box-shadow: var(--shadow);
@@ -423,7 +447,7 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 }
 
 .order-field { display:flex; flex-direction: column; }
-.order-label { font-size: 12px; font-weight: 700; letter-spacing: .2px; color: var(--ink-2); text-transform: uppercase; }
+.order-label { font-size: 12px; font-weight: 700; letter-spacing: .2px; color: var(--ink-2); text-transform: uppercase; margin-right: 1rem; }
 .order-value { font-size: 14px; color: var(--ink); }
 
 /* Acciones */
@@ -458,7 +482,7 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
 }
 
 .subsection-title {
-  width: 100%;
+  margin-bottom: 1rem;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -599,9 +623,13 @@ select.w-full.border.rounded {
   padding: 16px;
 }
 .modal-card {
-  width: 100%; max-width: 480px;
-  background: #fff; border-radius: 16px; padding: 16px;
+  width: 95%; /* En lugar de 100% para dejar aire a los costados */
+  max-width: 480px;
+  background: #fff; 
+  border-radius: 16px; 
+  padding: 20px;
   box-shadow: var(--shadow);
+  margin: auto; /* Centrado extra */
 }
 
 
@@ -632,10 +660,16 @@ select.w-full.border.rounded {
 }
 
 /* ====== Fila de cantidad (horizontal) ====== */
+/* En styles.css */
 .qty-row {
-  display: grid; grid-template-columns: 1fr auto; align-items: center;
-  padding: 6px 0; border-top: 1px dashed #edf0f3;
+  display: flex;
+  justify-content: space-between; /* Texto a la izquierda, selector a la derecha */
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px dashed #eee;
+  margin-top: 10px;
 }
+
 .qty-row:first-of-type { border-top: 0; }
 .qty-row__label {
   font-size: 13px; font-weight: 700; color: #232b36;
@@ -717,3 +751,1663 @@ select.w-full.border.rounded {
 .searchbar__clear:hover {
   background: #e9e9e9;
 }
+
+
+/* === Badge notificación === */
+.badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:18px;height:18px;padding:0 6px;
+  background:#e53935;color:#fff;border-radius:999px;
+  font-weight:800;font-size:12px;line-height:1;
+  margin-left:8px; box-shadow:0 0 0 2px #fff;
+}
+
+
+/* ──────────────────────────────────────────────
+   Título de cada estado (línea con el contador)
+   ────────────────────────────────────────────── */
+.section-title--state {
+  display: flex;
+  align-items: center;
+  gap: 8px;              /* separa Badge, label, dot, contador y flecha */
+  min-height: 40px;      /* consistente en móvil/desktop */
+}
+
+/* Empuja todo lo que viene después hacia la derecha */
+.section-title--state .state-label {
+  flex: 1;
+  font-weight: 700;      /* opcional: da más presencia al nombre del estado */
+}
+
+/* Contador al final (badge) */
+.section-title--state .state-count {
+  background: grey;   /* tu color de marca (ajustá si querés otro) */
+  color: #fff;
+  border-radius: 999px;
+  padding: 2px 10px;
+  min-width: 26px;            /* para que no “salte” cuando cambia de 1→2 dígitos */
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  box-shadow: 0 0 0 2px #fff; /* aro blanco, se integra con el fondo de la card */
+}
+
+/* Si tu componente <Badge /> renderiza un inline-element, podrías dar un pequeño margen */
+.section-title--state .badge,
+.section-title--state .state-badge {
+  margin-right: 4px;
+}
+
+/* Ajuste fino del chev si querés que no quede demasiado pegado al borde */
+.section-title--state .chev.chev--sm {
+  margin-left: 8px;
+}
+
+
+/* Pill para el responsable asignado */
+.pill--user {
+  color: #0b63c5;                 /* celeste/azul marca */
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* separación entre pills del header de la tarjeta */
+.order-head .pill + .pill {
+  margin-left: 6px;
+}
+
+
+/* Estilo más compacto para inputs numéricos pequeños */
+.input--sm {
+  max-width: 120px;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+/* Card compacta para datos de preparación */
+.card--preparacion {
+  margin-top: 2rem;
+  padding: 12px;
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+  background: #f9f9f9;
+  border: 1px solid #e2e6eb;
+}
+
+/* Botón más pequeño */
+.btn--sm {
+  padding: 8px 12px;
+  font-size: 14px;
+  background-color: #87a8ce;
+  color: black;
+  margin: 1rem;
+}
+
+
+/* Campos apilados verticalmente dentro de la card de preparación */
+.preparacion-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Alinea cada etiqueta con su input */
+.preparacion-fields .field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+
+/* Centrar y reducir el ancho de la card de preparación */
+.card--centrada {
+  margin-top: 2rem;
+  width: 50%;               /* ocupa la mitad del contenedor */
+  margin: 2rem auto;           /* centra horizontalmente */
+  display: flex;
+  flex-direction: column;
+  align-items: center;      /* centra el contenido interno */
+}
+
+/* En pantallas chicas (celular), ocupa todo el ancho */
+@media (max-width: 720px) {
+  .card--centrada {
+    width: 100%;
+  }
+}
+
+/* Layout 2 columnas para vista de ventas en desktop */
+.ventas-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr; /* Default mobile */
+  width: 100%;
+}
+
+/* Para pantallas chicas, que vuelva a una columna */
+@media (min-width: 768px) {
+  .ventas-grid {
+    grid-template-columns: 1.5fr 1fr; /* Escritorio */
+  }
+}
+
+.btn--asignacion-secundaria {
+  background-color: #f0f0f0;
+  color: #000;
+  border: 1px solid #ccc;
+  transition: background-color 0.2s;
+}
+
+.btn--asignacion-secundaria:hover {
+  background-color: #e0e0e0;
+}
+
+.btn--asignacion-principal {
+  background-color: #2d6cdf;
+  color: white;
+  border: none;
+  transition: background-color 0.2s;
+}
+
+.btn--asignacion-principal:hover {
+  background-color: #1f4fb3;
+}
+
+.btn-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* =========================================================
+   ErrorCarga (mobile friendly)
+   ========================================================= */
+
+/* Contenedor general de la página */
+.page.error-carga {
+  padding: 12px;
+  background: var(--bg-soft);
+}
+
+/* Card centrada y con ancho cómodo */
+.page.error-carga .card {
+  max-width: 520px;
+  margin: 12px auto;
+  padding: 16px;
+}
+
+/* Títulos */
+.page.error-carga .title {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 8px;
+}
+
+.page.error-carga .subtitle {
+  margin: 0 0 14px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+/* Alerts (mensaje arriba) */
+.alert {
+  border: 1px solid #e9eef5;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 10px 0 14px;
+  font-weight: 600;
+}
+
+.alert-error {
+  background: #fdecea;
+  border-color: #f5c2c7;
+  color: var(--error);
+}
+
+.alert-success {
+  background: #e7f5ec;
+  border-color: #cde9d6;
+  color: var(--ok);
+}
+
+/* Form layout */
+.form {
+  display: grid;
+  gap: 12px;
+}
+
+.form-row {
+  display: grid;
+  gap: 6px;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* Inputs */
+.textarea {
+  resize: vertical;
+  min-height: 90px;
+}
+
+.hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* Botonera: full width en mobile y sin márgenes raros */
+.actions {
+  margin-top: 8px;
+}
+
+.page.error-carga .btn {
+  margin: 0;              /* IMPORTANTE: pisa el margin: 1rem global */
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 14px;
+}
+
+/* Compatibilidad con la clase que usaste en ErrorCarga.jsx */
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+}
+
+/* Si el botón está deshabilitado */
+.btn-primary[disabled],
+.page.error-carga .btn[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Notita final */
+.footnote {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* Ajustes extra mobile */
+@media (max-width: 480px) {
+  .page.error-carga {
+    padding: 10px;
+  }
+  .page.error-carga .card {
+    padding: 14px;
+  }
+}
+
+.modal-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 9999;
+}
+
+.modal{
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.18);
+  display: grid;
+  gap: 12px;
+}
+
+.modal-title{
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.btn--ghost{
+  background: transparent;
+  border: 1px solid #e9eef5;
+}
+
+/* =========================
+   LOGIN
+========================= */
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: #f5f7fb;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+}
+
+.login-title {
+  margin-bottom: 20px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login-input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 16px;
+  border-radius: 10px;
+  border: 1px solid #d0d7e2;
+}
+
+.login-input:focus {
+  outline: none;
+  border-color: #4a6cf7;
+  box-shadow: 0 0 0 2px rgba(74,108,247,0.15);
+}
+
+.login-separator {
+  text-align: center;
+  margin: 16px 0;
+  color: #777;
+  font-size: 14px;
+}
+
+.login-error {
+  margin-top: 12px;
+  color: #c62828;
+  font-size: 14px;
+  text-align: center;
+}
+
+/* =========================
+   BOTONES (reutilizable)
+========================= */
+
+.btn {
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.btn-full {
+  width: 100%;
+}
+
+.btn-primary {
+  background: #4a6cf7;
+  color: #fff;
+  border: none;
+}
+
+.btn-primary:hover {
+  background: #3b5be0;
+}
+
+.btn-outline {
+  background: #fff;
+  border: 1px solid #d0d7e2;
+}
+
+.btn-outline:hover {
+  background: #f3f5f9;
+}
+
+
+/* Logo */
+.login-logo {
+  display: block;
+  margin: 0 auto 16px auto;
+  max-width: 140px;
+}
+
+/* Asegurar centrado real de botones */
+.login-card button {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
+
+/* Separador "o" más prolijo */
+.login-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.login-separator::before,
+.login-separator::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #e0e4ec;
+}
+
+/* =========================
+   Modal detalle de errores
+   ========================= */
+
+.error-item{
+  background: #476fbf;
+  border-color: #476fbf;
+}
+
+/* 🔒 Fuerza blanco para TODO el contenido interno (evita que lo pisen otros estilos) */
+.error-item,
+.error-item *{
+  color: #fff !important;
+}
+
+/* Un poco más suave para la línea secundaria */
+.error-item .subtitle{
+  color: rgba(255,255,255,.9) !important;
+}
+
+.error-item:hover{
+  background: #3f63ad;
+  border-color: #3f63ad;
+}
+
+
+/* =========================
+   ACTITUD / DESEMPEÑO (multi-operario)
+   ========================= */
+
+.perf-grid{
+  display: grid;
+  gap: 12px;
+}
+
+/* En desktop: 2 columnas */
+@media (min-width: 720px){
+  .perf-grid{
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.perf-card{
+  border: 1px solid #e8ebf0;
+  border-radius: 14px;
+  padding: 14px;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0,0,0,.04);
+}
+
+.perf-head{
+  margin-bottom: 10px;
+}
+
+.perf-name{
+  font-weight: 800;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.perf-sub{
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
+/* --- MEJORAS PARA PORTAL DE CLIENTES --- */
+
+/* Forzamos el color corporativo del logo en el botón primario */
+.btn--brand-solid {
+  background-color: var(--brand); /* #1c6ec4 del logo */
+  color: #ffffff !important;
+  border: none;
+}
+
+/* Botón de éxito (NUEVO PEDIDO) sin depender de estilos inline */
+.btn--success-solid {
+  background-color: var(--ok);
+  color: #ffffff !important;
+  border: none;
+}
+
+/* Fix para el botón de pedidos anteriores (evitar texto invisible) */
+.btn--outline-brand {
+  background: transparent;
+  border: 2px solid var(--brand);
+  color: var(--brand) !important; /* Texto azul sobre fondo blanco */
+}
+
+.btn--outline-brand:hover {
+  background: var(--brand);
+  color: #ffffff !important; /* Invertimos al pasar el mouse */
+}
+
+/* Contenedor del Logo en el Portal */
+.portal-logo-container {
+  margin-bottom: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.portal-logo {
+  width: 200px; /* Un poco más grande para que gane presencia */
+  height: auto;
+  margin-bottom: var(--space-1);
+}
+
+
+.portal-card {
+  max-width: 650px;       /* Mucho más ancha horizontalmente */
+  min-height: 500px;     /* Forzamos una altura mínima vertical */
+  width: 90%;            /* Para que sea responsiva en tablets */
+  padding: 60px 40px;    /* Padding generoso para que el contenido respire */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center; /* Centra todo verticalmente dentro de la card */
+  gap: var(--space-6);   /* Espacio mayor entre logo, botones y pie */
+  box-shadow: 0 20px 40px rgba(0,0,0,0.1); /* Sombra más profunda para dar peso */
+}
+
+/* Agrandamos un poco los botones para que acompañen el tamaño de la card */
+.portal-card .btn-big {
+  padding: 24px;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.portal-logo-grande {
+  width: auto; /* Logo con más autoridad */
+  height: 200px;
+  margin-bottom: var(--space-2);
+}
+
+.portal-subtitle {
+  font-size: 1.1rem;
+  letter-spacing: 0.5px;
+  color: var(--ink-2);
+}
+
+/* Botón de navegación superior unificado */
+.nav-back {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0; /* Quitamos el margen global de 1rem que los descentra */
+  padding: 8px 16px;
+  font-size: 14px;
+}
+
+/* Botón de Logout sutil para el Header */
+.btn-logout {
+  background: transparent;
+  border: 1px solid #ff4d4f;
+  color: #ff4d4f;
+  padding: 6px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.btn-logout:hover {
+  background: #fff1f0;
+  transform: translateY(-1px);
+}
+
+/* Contenedor principal que ocupa exactamente el alto de la pantalla */
+.screen-full-height {
+  height: calc(100vh - 72px); /* Resta el alto del topbar */
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* Centra el bloque de botones verticalmente */
+  align-items: center;
+  padding: var(--space-2);
+  overflow: hidden; /* Evita el scroll innecesario */
+}
+
+/* Menú de botones adaptativo */
+.menu-buttons-adaptive {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 400px;
+  /* Esto hace que el espacio se achique en pantallas cortas */
+  gap: clamp(10px, 3vh, 30px); 
+}
+
+/* Hacemos los botones un poco más compactos en vertical para que entren todos */
+.btn-big-adaptive {
+  padding: clamp(12px, 2vh, 20px) 22px;
+  font-size: 18px;
+  margin: 0 !important; /* Eliminamos el margin global que rompe el centrado */
+}
+
+
+
+
+/* Ajuste para que la tabla use mejor el espacio horizontal */
+.table-gestion td, .table-gestion th {
+  padding: 12px 16px;
+  font-size: 15px;
+}
+
+/* Botón para eliminar ítem del carrito */
+.btn--remove {
+  background: #fff0f0;
+  color: #e53935;
+  border: 1px solid #ffcccb;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  cursor: pointer;
+  margin-left: 10px;
+}
+.btn--remove:hover { background: #fee2e2; }
+
+/* Botón para vaciar todo */
+.btn--clear-all {
+  background: transparent;
+  color: var(--error);
+  border: 1px solid var(--error);
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+
+.text-center { text-align: center; }
+
+/* Opcional: Icono de advertencia para el modal */
+.modal-icon-warn {
+    font-size: 40px;
+    margin-bottom: 15px;
+    color: var(--error);
+}
+
+/* === CAROUSEL NOVEDADES === */
+
+.carousel-novedades {
+  width: 100%;
+  overflow: hidden; /* Corta cualquier intento de desborde */
+}
+
+.carousel-scroll {
+  display: flex;
+  gap: var(--space-3);
+  overflow-x: auto;
+  padding: 10px 0;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+} 
+
+.carousel-card {
+  /* Ancho dinámico: 85% de la pantalla en móvil, max 400px en PC */
+  width: 85vw;
+  max-width: 400px;
+  height: 220px; 
+  flex-shrink: 0;
+  scroll-snap-align: center;
+  border-radius: var(--radius);
+  background: #fff;
+  border: 1px solid var(--bg-metal);
+  box-shadow: var(--shadow-md);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.carousel-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain; /* Para que los perfiles de aluminio se vean enteros */
+  padding: var(--space-2);
+}
+
+.carousel-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  margin: 0; /* Pisa el margin-left del .badge global */
+  z-index: 10;
+}
+
+/* Reutilizamos tu clase hide-scrollbar del CSS */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 1. Contenedor tipo píldora */
+.qty-selector {
+  display: inline-flex;
+  align-items: center;
+  background: #f1f3f5; /* Gris muy suave */
+  border-radius: 999px;
+  padding: 3px;
+  border: 1px solid #e9ecef;
+  gap: 4px;
+}
+
+/* 2. Botones circulares con sombra sutil */
+.qty-selector__btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: #ffffff;
+  color: var(--brand);
+  font-weight: 800;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  transition: transform 0.1s active;
+}
+
+.qty-selector__btn:active { transform: scale(0.95); }
+.qty-selector__btn:disabled { opacity: 0.4; box-shadow: none; }
+
+/* 3. El número: Sin bordes, sin fondo, ancho fijo */
+.qty-selector__input {
+  width: 40px; /* Ancho pequeño para que no ocupe todo el largo */
+  border: none !important; /* Adiós al borde negro */
+  background: transparent !important;
+  text-align: center;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--ink);
+  outline: none; /* Evita el borde azul al clickear */
+  padding: 0;
+  margin: 0;
+}
+
+/* 4. Alineación en el Modal (Catalogo.js) */
+.qty-row {
+  display: flex;
+  justify-content: space-between; /* Texto a la izquierda, Píldora a la derecha */
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px dashed #eee;
+  margin-top: 10px;
+}
+
+/* Layout General para PC */
+@media (min-width: 1024px) {
+  .container {
+    max-width: 1200px; /* Expandimos el contenedor */
+    padding: var(--space-6);
+  }
+
+  /* Catálogo: Categorías a la izquierda, productos a la derecha */
+  .catalogo-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr; /* Barra lateral de navegación */
+    gap: var(--space-6);
+    align-items: start;
+  }
+
+  /* Grid de productos más denso en PC */
+  .product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+  }
+}
+
+/* Modal de Producto para PC */
+@media (min-width: 768px) {
+  .modal-card {
+    max-width: 700px; /* Más ancho para mostrar imagen y datos lado a lado */
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    padding: 32px;
+  }
+  .modal-header-full { grid-column: span 2; }
+}
+/* ==========================================================
+   LAYOUT DEL CATÁLOGO (RESPONSIVE)
+   ========================================================== */
+
+/* 🔥 1. Ocultamos la barra lateral en celulares por defecto */
+.sidebar-categorias {
+  display: none; 
+}
+
+/* --- CONFIGURACIÓN PARA PC (Solo pantallas grandes) --- */
+@media (min-width: 1024px) {
+  .catalogo-layout {
+    display: grid;
+    grid-template-columns: 250px 1fr; /* Crea las dos columnas */
+    gap: 30px;
+    align-items: start;
+  }
+
+  /* 🔥 2. Hacemos aparecer la barra lateral SOLO en PC */
+  .sidebar-categorias {
+    display: flex; 
+    flex-direction: column;
+    position: sticky;
+    top: 100px;
+  }
+
+  /* Ajustamos la grilla para que entren más productos en PC */
+  .product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)) !important;
+  }
+}
+
+
+/* ==========================================================
+   MODAL GESTION DE PEDIDOS (TAMAÑO XL MAXIMIZADO)
+   ========================================================== */
+.modal-card--xl {
+    display: flex;
+    flex-direction: column;
+    max-height: 95vh; /* Le damos un poco más de margen al límite de altura */
+    background: #fff;
+    padding: 20px;
+    border-radius: 12px;
+}
+
+/* 🔥 Ampliación extrema SOLO para pantallas de PC */
+@media (min-width: 768px) {
+    .modal-card--xl {
+        width: 98%; /* Ocupa casi todo el ancho disponible */
+        max-width: 1300px; /* Límite mucho más amplio para que la tabla respire */
+        min-height: 88vh; /* Forzamos a que el modal sea SIEMPRE bien alto */
+    }
+
+    /* Achicamos un poco los márgenes del encabezado en PC para regalarle ese espacio a los productos */
+    .modal-header-fixed {
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+    }
+}
+
+/* El encabezado queda fijo arriba */
+.modal-header-fixed {
+    flex-shrink: 0; 
+    border-bottom: 1px solid #eee;
+}
+
+/* 🔥 Esta área ahora se va a comer todo el "min-height: 88vh" que le regalamos arriba */
+.modal-scroll-area {
+    flex: 1; 
+    overflow-y: auto; 
+    overflow-x: auto; 
+    padding-right: 5px; 
+}
+
+/* Evitamos que el texto de la tabla se amontone en varias líneas */
+.table-gestion th, 
+.table-gestion td {
+    white-space: nowrap; 
+}
+
+/* ==========================================================
+   TÍTULOS COLAPSABLES CATÁLOGO (RAMA 2)
+   ========================================================== */
+.section-title--catalogo {
+    background: var(--bg-soft); /* Fondo gris/azulado súper sutil */
+    border: 1px solid #e9eef5;
+    border-left: 4px solid var(--brand); /* El acento de color a la izquierda */
+    border-radius: 8px;
+    padding: 14px 16px;
+    transition: background 0.2s ease;
+}
+
+.section-title--catalogo:hover {
+    background: #f1f5f9; /* Efecto hover elegante */
+}
+
+/* ============================================================
+   ProductModal.css — Estilos del Modal Rediseñado
+   Pegá esto al final de tu styles.css (o importalo por separado)
+   ============================================================ */
+
+/* ── Backdrop ─────────────────────────────────────────────── */
+.pm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 900;
+  animation: pm-fade-in 0.18s ease;
+}
+
+/* ── Sheet (el panel en sí) ───────────────────────────────── */
+.pm-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 901;
+  background: #fff;
+  border-radius: 20px 20px 0 0;
+  padding: 0 0 env(safe-area-inset-bottom, 16px);
+  max-height: 92dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  animation: pm-slide-up 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* En PC: se centra como modal clásico */
+  @media (min-width: 700px) {
+    top: 50%;
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+    width: 520px;
+    max-height: 88vh;
+    border-radius: 16px;
+    animation: pm-zoom-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+/* ── Header ───────────────────────────────────────────────── */
+.pm-header {
+  padding: 20px 20px 0;
+}
+
+.pm-header__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pm-color-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pm-kit-tag,
+.pm-category-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 4px;
+}
+
+.pm-kit-tag {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 0.5px solid #bfdbfe;
+}
+
+.pm-category-tag {
+  background: #f1f5f9;
+  color: #475569;
+  border: 0.5px solid #e2e8f0;
+}
+
+.pm-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #0f172a;
+  margin: 0 0 4px;
+  letter-spacing: -0.02em;
+}
+
+.pm-sku {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+  text-transform: uppercase;
+  margin: 0 0 10px;
+}
+
+.pm-description {
+  font-size: 13.5px;
+  color: #64748b;
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* ── Kit components list ──────────────────────────────────── */
+.pm-kit-components {
+  margin-top: 14px;
+  background: #f8fafc;
+  border: 0.5px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.pm-kit-components__title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin: 0 0 8px;
+}
+
+.pm-kit-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  border-bottom: 0.5px solid #e9eef3;
+}
+
+.pm-kit-row:last-child {
+  border-bottom: none;
+}
+
+.pm-kit-row__desc {
+  font-size: 12.5px;
+  color: #334155;
+}
+
+.pm-kit-row__qty {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  background: #e2e8f0;
+  padding: 1px 7px;
+  border-radius: 4px;
+}
+
+/* ── Divider ──────────────────────────────────────────────── */
+.pm-divider {
+  height: 0.5px;
+  background: #e9eef3;
+  margin: 18px 0;
+}
+
+/* ── Data grid (stock + precio + peso) ────────────────────── */
+.pm-data-grid {
+  padding: 0 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.pm-data-cell--weight {
+  grid-column: 1 / -1;
+}
+
+.pm-data-cell__label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+
+.pm-data-cell__value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.pm-data-cell__value small {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+/* ── Stock badges (vista vendedor) ────────────────────────── */
+.pm-stock-badges {
+  display: flex;
+  gap: 8px;
+}
+
+.pm-stock-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 0.5px solid transparent;
+}
+
+.pm-stock-badge--ok {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.pm-stock-badge--warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.pm-stock-badge--zero {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.pm-stock-badge--loading {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.pm-stock-badge__label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.pm-stock-badge--ok   .pm-stock-badge__label { color: #16a34a; }
+.pm-stock-badge--warn .pm-stock-badge__label { color: #d97706; }
+.pm-stock-badge--zero .pm-stock-badge__label { color: #dc2626; }
+
+.pm-stock-badge__qty {
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pm-stock-badge--ok   .pm-stock-badge__qty { color: #15803d; }
+.pm-stock-badge--warn .pm-stock-badge__qty { color: #b45309; }
+.pm-stock-badge--zero .pm-stock-badge__qty { color: #dc2626; }
+
+.pm-stock-badge__unit {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* Shimmer de carga */
+.pm-stock-badge__shimmer {
+  width: 52px;
+  height: 18px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: pm-shimmer 1.4s infinite;
+  display: inline-block;
+}
+
+/* ── Client pill ──────────────────────────────────────────── */
+.pm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 20px;
+}
+
+.pm-pill--ok   { background: #f0fdf4; color: #16a34a; }
+.pm-pill--warn { background: #fffbeb; color: #d97706; }
+.pm-pill--zero { background: #fef2f2; color: #dc2626; }
+.pm-pill--loading { background: #f1f5f9; color: #94a3b8; }
+
+/* ── Precio ───────────────────────────────────────────────── */
+.pm-price {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.pm-price__currency {
+  font-size: 14px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.pm-price {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.03em;
+}
+
+/* ── Cantidad ─────────────────────────────────────────────── */
+.pm-qty-row {
+  padding: 0 20px;
+}
+
+.pm-qty-row__label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 10px;
+}
+
+.pm-qty-warning {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #dc2626;
+}
+
+/* ── Total ────────────────────────────────────────────────── */
+.pm-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px 0;
+}
+
+.pm-total-row__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.pm-total-row__value {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+/* ── Actions ──────────────────────────────────────────────── */
+.pm-actions {
+  padding: 16px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pm-btn-add {
+  width: 100%;
+  padding: 16px;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform 0.1s ease, opacity 0.15s ease;
+}
+
+.pm-btn-add--active {
+  background: #0f172a;
+  color: #fff;
+}
+
+.pm-btn-add--active:hover  { opacity: 0.88; }
+.pm-btn-add--active:active { transform: scale(0.98); }
+
+.pm-btn-add--disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.pm-btn-cancel {
+  width: 100%;
+  padding: 13px;
+  border: 0.5px solid #e2e8f0;
+  border-radius: 12px;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.pm-btn-cancel:hover { background: #f8fafc; }
+
+.pm-out-of-stock {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  padding: 14px;
+  border: 0.5px dashed #e2e8f0;
+  border-radius: 10px;
+}
+
+/* ── Animaciones ──────────────────────────────────────────── */
+@keyframes pm-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pm-slide-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+@keyframes pm-zoom-in {
+  from { opacity: 0; transform: translate(-50%, -46%); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+@keyframes pm-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ============================================================
+   ProductCard.css — Tarjeta + Grilla de Productos
+   Pegá al final de styles.css
+   ============================================================ */
+
+/* ── Grilla ────────────────────────────────────────────────
+   Reemplaza tu clase .product-grid existente.
+   2 columnas en mobile, 3 en tablet, 4 en PC con sidebar.
+   ──────────────────────────────────────────────────────── */
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (min-width: 560px) {
+  .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+}
+
+@media (min-width: 900px) {
+  .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+}
+
+@media (min-width: 1200px) {
+  .product-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+}
+
+/* ── Tarjeta ───────────────────────────────────────────────── */
+.pc-card {
+  position: relative;
+  background: #fff;
+  border: 0.5px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+
+  /* Entrada escalonada */
+  animation: pc-fade-up 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  /* Hover */
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.pc-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  border-color: #cbd5e1;
+}
+
+.pc-card:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* ── Banda de color superior ───────────────────────────────── */
+.pc-color-band {
+  height: 4px;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+/* ── Cuerpo ────────────────────────────────────────────────── */
+.pc-body {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 6px;
+}
+
+/* ── Badges ────────────────────────────────────────────────── */
+.pc-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 18px; /* evita salto de layout cuando no hay badges */
+}
+
+.pc-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  line-height: 1.6;
+}
+
+.pc-badge--offer {
+  background: #fff1f0;
+  color: #cf1322;
+  border: 0.5px solid #ffa39e;
+}
+
+.pc-badge--kit {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 0.5px solid #bfdbfe;
+}
+
+.pc-badge--color {
+  background: #f8fafc;
+  color: #64748b;
+  border: 0.5px solid #e2e8f0;
+}
+
+/* ── Nombre ────────────────────────────────────────────────── */
+.pc-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  margin: 0;
+
+  /* Clamp a 2 líneas para consistencia visual en la grilla */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Descripción corta ─────────────────────────────────────── */
+.pc-desc {
+  font-size: 11.5px;
+  color: #94a3b8;
+  line-height: 1.45;
+  margin: 0;
+
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Footer: SKU + flecha ──────────────────────────────────── */
+.pc-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 0.5px solid #f1f5f9;
+}
+
+.pc-sku {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #cbd5e1;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+.pc-arrow {
+  font-size: 13px;
+  color: #cbd5e1;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.pc-card:hover .pc-arrow {
+  color: #0f172a;
+  transform: translateX(3px);
+}
+
+/* ── Animación de entrada ──────────────────────────────────── */
+@keyframes pc-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Estado vacío ──────────────────────────────────────────── */
+.pc-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 48px 20px;
+  color: #94a3b8;
+  font-size: 14px;
+  background: #f8fafc;
+  border: 0.5px dashed #e2e8f0;
+  border-radius: 12px;
+}
+
+.pc-empty-icon {
+  font-size: 28px;
+  display: block;
+  margin-bottom: 10px;
+}
+
+/* ── Skeleton loader (mientras carga el catálogo) ──────────── */
+.pc-skeleton {
+  background: #fff;
+  border: 0.5px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.pc-skeleton__band {
+  height: 4px;
+  background: #f1f5f9;
+}
+
+.pc-skeleton__body {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pc-skeleton__line {
+  height: 12px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e8edf3 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: pc-shimmer 1.4s infinite;
+}
+
+@keyframes pc-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Search-First Catálogo ───────────────────────────── */
+.sf-search-input {
+  width: 100%;
+  padding: 14px 42px 14px 44px;
+  background: #fff;
+  border: 0.5px solid #e2e8f0;
+  border-radius: 14px;
+  font-size: 15px;
+  color: #0f172a;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.sf-search-input:focus {
+  border-color: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(15,23,42,0.06);
+}
+.sf-search-input::placeholder { color: #94a3b8; }
+
+.sf-search-clear {
+  position: absolute; right: 12px; top: 50%;
+  transform: translateY(-50%);
+  background: #f1f5f9; border: none; border-radius: 50%;
+  width: 26px; height: 26px; font-size: 16px; color: #64748b;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background 0.1s;
+}
+.sf-search-clear:hover { background: #e2e8f0; }
+
+.sf-filters-bar {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  align-items: center; margin-bottom: 14px;
+}
+
+.sf-filter-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: #94a3b8; flex-shrink: 0;
+}
+
+.sf-chip {
+  padding: 6px 13px; background: #fff;
+  border: 0.5px solid #e2e8f0; border-radius: 20px;
+  font-size: 12px; font-weight: 600; color: #64748b;
+  cursor: pointer; white-space: nowrap;
+  transition: all 0.15s; font-family: inherit;
+}
+.sf-chip:hover { border-color: #94a3b8; color: #334155; background: #f8fafc; }
+
+.sf-chip--active {
+  background: #0f172a; color: #fff; border-color: #0f172a;
+}
+.sf-chip--active:hover { background: #1e293b; }
+
+.sf-chip-x { margin-left: 5px; opacity: 0.6; font-size: 13px; }
+
+.sf-chip--clear { color: #dc2626; border-color: #fecaca; }
+.sf-chip--clear:hover { background: #fff1f0; }
+
+.sf-sep { color: #e2e8f0; font-size: 16px; padding: 0 2px; }
+
+.sf-results-count {
+  font-size: 12px; font-weight: 600; color: #94a3b8;
+  margin-bottom: 12px; letter-spacing: 0.03em;
+}
+.sf-results-count strong { color: #334155; }

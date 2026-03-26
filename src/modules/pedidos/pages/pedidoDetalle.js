@@ -1,67 +1,3 @@
-/*import { useEffect, useState } from "react";
-import { cambiarEstado, ESTADOS } from "../services/estados";
-import { getFlag } from "../services/featureFlags";
-import { useApp } from "../../../context/AppContext";
-import { getPedido } from "../services/pedidosFS";
-
-export default function PedidoDetalle({ id }) {
-  const { haptics, toast } = useApp();
-  const [pedido, setPedido] = useState(null);
-  const [lite, setLite] = useState(true);
-
-  useEffect(()=>{ (async ()=>{ setLite(await getFlag("MODO_LITE")); })(); },[]);
-  useEffect(()=>{ (async ()=>{ setPedido(await getPedido(id)); })(); },[id]);
-
-  if (!pedido) return <p>Cargando…</p>;
-
-  async function onComenzar() {
-    try {
-      await cambiarEstado(id, ESTADOS.EN_PREPARACION);
-      haptics?.success?.();
-      toast.success("Preparación iniciada");
-    } catch(e) { toast.error(e.message); }
-  }
-
-  async function onFinalizar() {
-    try {
-      await cambiarEstado(id, ESTADOS.PREPARADO);
-      haptics?.success?.();
-      toast.success("Pedido preparado");
-    } catch(e) { toast.error(e.message); }
-  }
-
-  return (
-    <div className="p-3">
-      <h1 className="font-bold mb-2">Pedido #{pedido.numero}</h1>
-
-      {pedido.estado === ESTADOS.ASIGNADO && (
-        <button className="w-full py-3 rounded bg-black text-white" onClick={onComenzar}>
-          Comenzar preparación
-        </button>
-      )}
-
-      {pedido.estado === ESTADOS.EN_PREPARACION && (
-        <div className="space-y-3">
-          {lite ? (
-            <div className="p-3 rounded border">
-              <p className="text-sm">MODO LITE activo: el escaneo QR está desactivado. Informa uso de tiras sueltas manualmente y continúa.</p>
-              {/* TODO: Inputs mínimos para consumo manual en LITE }
-            </div>
-          ) : (
-            <div className="p-3 rounded border">
-              {/* Aquí renderiza tu componente QrScanner si no es LITE }
-              {/* <QrScanner onScan={...} /> }
-            </div>
-          )}
-          <button className="w-full py-3 rounded bg-black text-white" onClick={onFinalizar}>
-            Finalizar preparación
-          </button>
-        </div>
-      )}
-    </div>
-  );
-} */
-
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
@@ -70,7 +6,7 @@ import { getPedido, asignarOperario, updateEstado } from "../services/pedidosFS"
 import { ESTADOS } from "../services/estados";
 import { getFlag } from "../services/featureFlags";
 import { db } from "../../../firebase";
-import { collection, getDocs, query, where, addDoc, serverTimestamp } from "firebase/firestore";
+import { doc, updateDoc, collection, getDocs, query, where, addDoc, serverTimestamp } from "firebase/firestore";
 import { getCatalogoByCodUru } from "../services/catalogo";
 import VolverListaPedidos from "../components/VolverListaPedidos";
 
@@ -82,6 +18,10 @@ import { actualizarMovimientosStockSueltas, confirmarPedidoConStock } from "../s
 import { useNavigate, useLocation } from "react-router-dom";
 import { despacharPedido } from "../services/despachoFS";
 
+import ConfirmarDespacho from "./confirmarDespacho";
+
+
+
 
 // — util: sanitiza a “código URU”
 function toURUCode(value) {
@@ -90,6 +30,32 @@ function toURUCode(value) {
   if (mNum) return mNum[0];
   return s.split(/\s+/)[0].replace(/[^\w-]/g, "");
 }
+
+// Categorías del operario
+const CAT_OPERARIO = ["PERFIL ALUMINIO", "KITS"];
+
+// Normaliza categoría desde catalogoProductos
+function getCategoriaEnc(uru, catalogoMap) {
+  return (catalogoMap?.[uru]?.categoria || "").toUpperCase().trim();
+}
+
+// Divide los productos en grupos
+function splitPorCategoria(productos, catalogoMap) {
+  const operario = [];
+  const encargado = [];
+
+  productos.forEach((it, i) => {
+    const raw = it.cod || it.descripcion || it.desc || "";
+    const uru = raw.match(/\b\d{7,}\b/)?.[0] || raw.split(" ")[0];
+    const cat = getCategoriaEnc(uru, catalogoMap);
+
+    if (CAT_OPERARIO.includes(cat)) operario.push({ it, uru, cat });
+    else encargado.push({ it, uru, cat });
+  });
+
+  return { operario, encargado };
+}
+
 
 function EncPreparacionPanel({
   pedido,                  // objeto pedido completo
@@ -107,6 +73,9 @@ function EncPreparacionPanel({
   const [scanForKey, setScanForKey] = React.useState(null);
   const [modalPack, setModalPack] = React.useState(null);   // {key, packSize, remain}
   const [modalError, setModalError] = React.useState(null); // {title, message}
+
+
+
 
   // helpers
   const toURU = v => String(v || "").match(/\d{6,}/)?.[0] || String(v || "");
@@ -372,6 +341,8 @@ export default function PedidoDetalle() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sending, setSending] = useState(false);
+    // === Accesorios controlados por el encargado ===
+  const [accChecks, setAccChecks] = useState({});
 
 
   function handleBack() {
@@ -400,6 +371,10 @@ export default function PedidoDetalle() {
   const [loadingOps, setLoadingOps] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const [bultos, setBultos] = useState(pedido?.bultos || "");
+  const [paquetes, setPaquetes] = useState(pedido?.paquetes || "");
+
+
   // catálogo enriquecido: { [uru]: { customerNo, finish, ... } }
   const [catalogoMap, setCatalogoMap] = useState({});
 
@@ -410,6 +385,11 @@ export default function PedidoDetalle() {
   const [showErrForm, setShowErrForm] = useState(false);
   const [detalleErr, setDetalleErr] = useState("");
   const [savingErr, setSavingErr] = useState(false);
+
+  const [cambiandoOperario, setCambiandoOperario] = useState(false);
+
+
+
 
   // resetear checks cuando cambia el pedido
   useEffect(() => {
@@ -424,20 +404,35 @@ export default function PedidoDetalle() {
   const checkedCount = useMemo(() => Object.values(checks).filter(Boolean).length, [checks]);
   const allChecked = totalProductos > 0 && checkedCount === totalProductos;
 
-  // confirmar control → pasa a CONTROLADO
-  async function confirmControl() {
+  async function guardarBultosYPaquetes() {
     try {
-      setSaving(true);
-      await updateEstado(id, ESTADOS.CONTROLADO);
-      toast.success("Pedido controlado");
-      setPedido(prev => (prev ? { ...prev, estado: ESTADOS.CONTROLADO } : prev));
+      const docRef = doc(db, "pedidos", id);
+      await updateDoc(docRef, {
+        bultos: Number(bultos),
+        paquetes: Number(paquetes),
+      });
+      toast.success("Datos guardados");
     } catch (e) {
-      console.error(e);
-      toast.error(e.message || "No se pudo confirmar el control");
-    } finally {
-      setSaving(false);
+      console.error("Error guardando bultos/paquetes", e);
+      toast.error("No se pudieron guardar los datos");
     }
   }
+
+
+  // confirmar control → pasa a CONTROLADO
+  async function confirmControl() {
+  try {
+    await updateDoc(doc(db, "pedidos", id), {
+      prepAccesoriosOk: true,
+    });
+
+    await updateEstado(id, ESTADOS.CONTROLADO);
+    toast.success("Pedido controlado");
+  } catch (e) {
+    toast.error(e.message);
+  }
+}
+
 
   async function submitErrorPreparacion() {
     if (!detalleErr.trim()) {
@@ -557,7 +552,7 @@ export default function PedidoDetalle() {
     // Cargamos la lista SOLO si:
     // 1) hay depósito, 2) el estado requiere asignación, 3) el rol es ENCARGADO
     if (!pedido?.deposito) return;
-    if (pedido?.estado !== ESTADOS.PENDIENTE_ASIGNAR) return;
+    if (![ESTADOS.PENDIENTE_ASIGNAR, ESTADOS.ASIGNADO].includes(pedido?.estado)) return;
     if ((profile?.role || "").toLowerCase() !== "encargado") return;
 
     let cancelled = false;
@@ -703,7 +698,7 @@ const filteredOperarios = useMemo(() => {
         <h1 className="font-bold text-xl">
           {pedido.numero || id}
         </h1>
-        <VolverListaPedidos className="btn btn--outline btn-sm" to={isVentas ? "/ventas/para-despachar" : "/encargado/pedidos"} />
+        <VolverListaPedidos className="btn btn--outline btn-sm" to= "/pedidos" />
       </div>
 
       {/* Detalle general */}
@@ -739,55 +734,122 @@ const filteredOperarios = useMemo(() => {
             </div>
 
             <div className="subsection-body">
-              <div className="product-grid">
-                {productos.map((it, i) => {
-                  const rawCode   = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
-                  const uru       = toURUCode(rawCode);
-                  const cat       = catalogoMap[uru] || {};
-                  const customer  = cat?.customerNo || cat?.customer_no || "—";
-                  const color     = cat?.finish || cat?.color || "—";
-                  const qty       = it.cant ?? it.cantidad ?? it.qty ?? 0;
+              {(() => {
+                const { operario, encargado } = splitPorCategoria(productos, catalogoMap);
 
-                  // clave para trackear el check (solo se usa en PREPARADO)
-                  const key      = `${uru || "idx"}-${i}`;
-                  const isCtrl   = pedido.estado === ESTADOS.PREPARADO;
-                  const checked  = !!checks[key];
-
-                  return (
-                    <div key={key} className="card product-card">
-                      <div className="product-heading">
-                        <span className="product-customer">{customer}</span>
-                        <span className="product-color">{color}</span>
-                        <span className="pill" style={{ marginLeft: "auto" }}>x{qty}</span>
-
-                        {isCtrl && (
-                          <label className="ml-2 flex items-center">
-                            <input
-                              type="checkbox"
-                              className="checkbox"
-                              checked={checked}
-                              onChange={() => toggleCheck(key)}
-                            />
-                          </label>
-                        )}
-                      </div>
+                return (
+                  <>
+                    {/* === Sección Operario === */}
+                    <div className="subsection-title">Perfiles y Kits</div>
+                    <div className="product-grid">
+                      {operario.map(({ it, uru, cat }, i) => (
+                        <div key={`op-${uru}-${i}`} className="card product-card">
+                          <div className="product-heading">
+                            <span className="product-customer">{catalogoMap?.[uru]?.customerNo || uru}</span>
+                            <span className="product-color">{catalogoMap?.[uru]?.finish || "—"}</span>
+                            <span className="pill" style={{ marginLeft: "auto" }}>
+                              x{it.cant ?? it.cantidad ?? it.qty ?? 0}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
+
+                    {/* === Sección Encargado === */}
+                    <div className="subsection-title">Accesorios / PVC / Vidrios / Refuerzos</div>
+                    <div className="product-grid">
+                      {encargado.map(({ it, uru, cat }, i) => (
+                        <div key={`enc-${uru}-${i}`} className="card product-card">
+                          <div className="product-heading">
+                            <span className="product-customer">{catalogoMap?.[uru]?.customerNo || uru}</span>
+                            <span className="product-color">{catalogoMap?.[uru]?.finish || "—"}</span>
+                            <span className="pill" style={{ marginLeft: "auto" }}>
+                              x{it.cant ?? it.cantidad ?? it.qty ?? 0}
+                            </span>
+                          </div>
+
+                          {/* Checkbox del ENCARGADO */}
+                          <div className="p-2">
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={!!accChecks[`${uru}-${i}`]}
+                                onChange={() => {
+                                  const key = `${uru}-${i}`;
+
+                                  // actualizamos los checks usados para allChecked
+                                  setChecks(prev => ({
+                                    ...prev,
+                                    [key]: !prev[key],
+                                  }));
+
+                                  // mantenemos accChecks para UI del encargado
+                                  setAccChecks(prev => ({
+                                    ...prev,
+                                    [key]: !prev[key],
+                                  }));
+                                }}
+                              />
+                              <span className="muted text-sm">Confirmar</span>
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+
 
               {/* Acciones del control SOLO visibles en PREPARADO */}
               {pedido.estado === ESTADOS.PREPARADO && (
                 <div className="mt-3 flex flex-col gap-2">
+                  <div className="card card--preparacion card--compact card--centrada space-y-2">
+                    <div className="subsection-title">
+                      <span>Datos de preparación</span>
+                    </div>
+                    <div className="subsection-body preparacion-fields">
+                      <div className="field-group">
+                        <label className="order-label">Cantidad de bultos</label>
+                        <input
+                          type="number"
+                          min="0"
+                          className="input input--sm"
+                          value={bultos}
+                          onChange={e => setBultos(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="field-group">
+                        <label className="order-label">Cantidad de paquetes</label>
+                        <input
+                          type="number"
+                          min="0"
+                          className="input input--sm"
+                          value={paquetes}
+                          onChange={e => setPaquetes(e.target.value)}
+                        />
+                      </div>
+
+                      <button
+                        className="btn btn--sm w-full bg-black text-white"
+                        onClick={guardarBultosYPaquetes}
+                      >
+                        Guardar datos
+                      </button>
+                    </div>
+                  </div>
+
+
                   <button
-                    className="btn w-full bg-black text-white disabled:opacity-60"
+                    className="btn bg-black text-white disabled:opacity-60"
                     onClick={confirmControl}
                     disabled={!allChecked || saving}
                   >
                     Confirmar control
                   </button>
                   <button
-                    className="btn btn--outline w-full"
+                    className="btn btn--outline"
                     onClick={() => setShowErrForm(v => !v)}
                   >
                     {showErrForm ? "Cancelar" : "Error en la preparación"}
@@ -878,9 +940,9 @@ const filteredOperarios = useMemo(() => {
               </div>
 
               {/* Acciones: apiladas (mobile-first) */}
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3">
                 <button
-                  className="btn btn--outline w-full disabled:opacity-60"
+                  className="btn btn--asignacion-secundaria"
                   onClick={handleAutoAsignarme}
                   disabled={!puedeAutoAsignarse || saving}
                 >
@@ -888,7 +950,7 @@ const filteredOperarios = useMemo(() => {
                 </button>
 
                 <button
-                  className="btn w-full bg-black text-white disabled:opacity-60"
+                  className={`btn btn--asignacion-principal ${(!puedeAsignarAlguien || !selectedOperario || saving) ? "btn-disabled" : ""}`}
                   onClick={handleConfirmarAsignacion}
                   disabled={!puedeAsignarAlguien || !selectedOperario || saving}
                 >
@@ -910,15 +972,90 @@ const filteredOperarios = useMemo(() => {
 
 
       {pedido.estado === ESTADOS.ASIGNADO && (
-        <div className="card">
-          <p className="mb-2 text-sm text-gray-600">
-            Responsable: <b>{pedido.operarioNombre || "—"}</b>
-          </p>
-          <button className="w-full py-3 rounded bg-black text-white" onClick={onComenzar}>
+        <div className="card space-y-3">
+          <div>
+            <p className="text-sm text-gray-600 mb-1">
+              Responsable: <b>{pedido.operarioNombre || "—"}</b>
+            </p>
+            {isEncargado && !cambiandoOperario && (
+              <button
+                className="btn btn--outline btn-sm"
+                onClick={() => setCambiandoOperario(true)}
+              >
+                Cambiar operario
+              </button>
+            )}
+          </div>
+
+          {cambiandoOperario && (
+            <div className="space-y-2">
+              <label className="order-label" htmlFor="select-op">Nuevo operario</label>
+              <select
+                id="select-op"
+                className="w-full border rounded px-3 py-2"
+                value={selectedOperario?.uid || ""}
+                onChange={(e) => {
+                  const uid = e.target.value;
+                  const op = operarios.find(o => o.id === uid);
+                  setSelectedOperario(uid ? { uid, nombre: op?.nombre || op?.email || "Operario" } : null);
+                }}
+              >
+                <option value="">— Seleccionar —</option>
+                {operarios
+                    .slice()
+                    .sort((a,b) => (a.nombre || a.email || "").localeCompare(b.nombre || b.email || ""))
+                    .map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.nombre || o.email}
+                      </option>
+                    ))}
+              </select>
+
+              <div className="flex gap-2">
+                <button
+                  className="btn btn--outline flex-1"
+                  onClick={() => setCambiandoOperario(false)}
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  className="btn flex-1 bg-black text-white disabled:opacity-60"
+                  disabled={!selectedOperario?.uid}
+                  onClick={async () => {
+                    try {
+                      setSaving(true);
+                      await asignarOperario(id, selectedOperario.uid, selectedOperario.nombre || "Operario");
+                      toast.success("Operario reasignado");
+                      setPedido(prev => prev ? {
+                        ...prev,
+                        operarioId: selectedOperario.uid,
+                        operarioNombre: selectedOperario.nombre
+                      } : prev);
+                      setCambiandoOperario(false);
+                    } catch (e) {
+                      console.error(e);
+                      toast.error("No se pudo reasignar");
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                >
+                  Confirmar cambio
+                </button>
+              </div>
+            </div>
+          )}
+
+          <button
+            className="w-full py-3 rounded bg-black text-white"
+            onClick={onComenzar}
+          >
             Comenzar preparación
           </button>
         </div>
       )}
+
 
       {pedido.estado === ESTADOS.EN_PREPARACION && (
         <EncPreparacionPanel
@@ -947,27 +1084,9 @@ const filteredOperarios = useMemo(() => {
             {/* Acción principal para ventas */}
             <div className="card">
               <div className="order-body">
-                <button
-                  className="btn w-full bg-black text-white disabled:opacity-60"
-                  disabled={sending}
-                  onClick={async () => {
-                    try {
-                      setSending(true);
-                      const res = await despacharPedido({ pedidoId: id, usuario: user /*, useCallable:true */ });
-                      toast.success(`Despachado: ${res.documento}`);
-                      // Opcional: volver a la lista
-                      navigate("/ventas/para-despachar", { replace: true });
-                    } catch (e) {
-                      const msg = e?.message || "Error al despachar";
-                      toast.error(msg);
-                      console.error("[DESPACHO] error", e);
-                    } finally {
-                      setSending(false);
-                    }
-                  }}
-                >
-                  {sending ? "Despachando…" : "Despachar"}
-                </button>
+                
+                  <ConfirmarDespacho pedidoId={id} />
+                
               </div>
             </div>
           </>

@@ -3,7 +3,7 @@ import { useApp } from "../context/AppContext";
 import { getPedidosPendientes } from "../API/finnegans";
 import { mapFinDocToPedido } from "../modules/pedidos/services/mapFinnegans";
 import { upsertPedidoDesdeFinnegans } from "../modules/pedidos/services/pedidosFS";
-import { syncPendientesUltimaSemana } from "../modules/pedidos/services/syncFinnegans";
+import { syncPendientesDeHoy} from "../modules/pedidos/services/syncFinnegans";
 
 // helpers
 function toYMD(d = new Date()) {
@@ -172,7 +172,7 @@ function step2_map() {
   async function stepAll_oneClick() {
     setLoading(true);
     try {
-      const res = await syncPendientesUltimaSemana({ debug: true });
+      const res = await syncPendientesDeHoy({ debug: true });
       setSummary(res);
       toast.success(
         `7 días → total:${res.total} · creados:${res.created} · actualizados:${res.updated} · omitidos:${res.skipped}`

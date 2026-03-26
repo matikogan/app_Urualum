@@ -9,11 +9,17 @@ import { getFlag } from "../services/featureFlags";
 import QrScanner from "../../../components/QrScanner";
 import { getCatalogoByCodUru } from "../services/catalogo";
 import { getStockTiras, confirmarPedidoConStock } from "../services/stockTiras";
+import { db } from "../../../firebase";
+import { doc, updateDoc } from "firebase/firestore";
+import { useNavigate } from "react-router-dom";
+
+
 
 // Modales que ya tenés en /components
 import PackConfirmModal from "./PackConfirmModal";
 import PackErrorModal from "./PackErrorModal";
 import Modal from "./Modal";
+import VolverListaPedidos from "./VolverListaPedidos";
 
 console.info("[OPERARIO DETALLE] SOURCE =", "pages/PedidoDetalleOperario.js v1");
 
@@ -77,6 +83,7 @@ export default function PedidoDetalleOperario() {
   const { id : rawId } = useParams();
   const pedidoId = useMemo(() => decodeURIComponent(rawId || ""), [rawId]);
   const { toast, haptics } = useApp();
+  const navigate = useNavigate();
   const { user } = useAuth();
 
   const [pedido, setPedido] = useState(null);
@@ -86,14 +93,43 @@ export default function PedidoDetalleOperario() {
   // estado por ítem
   const [prep, setPrep] = useState({});
 
+    // catálogo
+  const [catalogoMap, setCatalogoMap] = useState({});
+
+
+  // === CATEGORÍAS PERMITIDAS PARA OPERARIO ===
+  const CAT_OPERARIO = ["PERFIL ALUMINIO", "KITS"];
+
+  // Normalizar categoría desde el catálogo
+  function getCategoria(uru) {
+    const d = catalogoMap?.[uru];
+    return (d?.categoria || "").toUpperCase().trim();
+  }
+
+  // Extraer código URU de un texto del item (viene desde Finnegans)
+  function toURUCode(raw) {
+    const s = String(raw || "").trim();
+    const m = s.match(/\b\d{7,}\b/);
+    return m ? m[0] : s.split(" ")[0];
+  }
+
+  // Filtrar productos del pedido que pertenecen al operario
+  const productosOperario = useMemo(() => {
+    const src = pedido?.productos || [];
+    return src.filter((it) => {
+      const raw = it.cod || it.descripcion || it.desc || "";
+      const uru = toURUCode(raw);
+      const cat = getCategoria(uru);
+      return CAT_OPERARIO.includes(cat);
+    });
+  }, [pedido?.productos, catalogoMap]);
+
   // LITE
   const [checks, setChecks] = useState({});
-  const totalProductos = Array.isArray(pedido?.productos) ? pedido.productos.length : 0;
+  const totalProductos = productosOperario.length;
   const checkedCount = Object.values(checks).filter(Boolean).length;
   const allChecked = totalProductos > 0 && checkedCount === totalProductos;
 
-  // catálogo
-  const [catalogoMap, setCatalogoMap] = useState({});
 
   // overlay flow
   const [scanForKey, setScanForKey] = useState(null); // string|null
@@ -300,12 +336,35 @@ export default function PedidoDetalleOperario() {
     setChecks(next);
   }
   async function onFinalizarLite() {
+    await finalizarPreparacion();
+  }
+  
+
+  async function finalizarPreparacion() {
     try {
+      // marcar perfiles/kits como preparados
+      await updateDoc(doc(db, "pedidos", pedido.id || pedidoId), {
+        prepPerfilesOk: true,
+      });
+
+      // cambiar estado del pedido
       await cambiarEstado(pedidoId, ESTADOS.PREPARADO);
+
+      // feedback al usuario (suena + vibra)
       haptics?.success?.();
       toast?.success?.("Pedido preparado");
-    } catch (e) { toast?.error?.(e.message); }
+
+      // redirigir después de un pequeño delay
+      setTimeout(() => {  
+        navigate("/operario/asignados");
+      }, 900);
+
+    } catch (e) {
+      console.error(e);
+      toast?.error?.(e.message || "No se pudo confirmar la preparación");
+    }
   }
+
 
   // ===== Overlay único (arriba de todo) =====
   const overlayOpen = !!(scanForKey || packError || packConfirm);
@@ -313,6 +372,7 @@ export default function PedidoDetalleOperario() {
   return (
     <div className="p-3 space-y-3">
       <header>
+        <VolverListaPedidos to="/operario/asignados" />
         <h1 className="font-bold">Pedido #{pedido.numero}</h1>
         <p className="text-sm text-gray-600">{pedido.cliente}</p>
       </header>
@@ -347,7 +407,7 @@ export default function PedidoDetalleOperario() {
               {lite && (
                 <>
                   <div className="product-grid">
-                    {(pedido?.productos || []).map((it, i) => {
+                    {productosOperario.map((it, i) => {
                       const qty = reqQty(it);
                       const raw = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
                       const uru = toURUCode(raw);
@@ -393,7 +453,7 @@ export default function PedidoDetalleOperario() {
               {!lite && (
                 <>
                   <div className="space-y-2">
-                    {(pedido?.productos || []).map((it, i) => {
+                    {(productosOperario.map || []).map((it, i) => {
                       const k = keyFor(it, i);
                       const need = reqQty(it);
                       const raw = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
@@ -548,38 +608,7 @@ export default function PedidoDetalleOperario() {
                   <button
                     type="button"
                     className="btn w-full bg-black text-white disabled:opacity-60"
-                    onClick={async () => {
-                      try {
-                        const items = (pedido?.productos || []).map((it, i) => {
-                          const k = keyFor(it, i);
-                          const raw = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
-                          const uru = toURUCode(raw);
-                          const p = prep[k] || {};
-                          return {
-                            codUru: uru,
-                            usadasSueltas: Number(p.usarSueltas || 0),
-                            paquete: p.paquete ? { packSize: Number(p.paquete.packSize || 0) } : null,
-                            usadasDePaquete: Number(p.usarDePaquete || 0),
-                            need: reqQty(it),
-                          };
-                        });
-
-                        const allOk = items.every(x => (x.usadasSueltas + x.usadasDePaquete) >= x.need);
-                        if (!allOk) { toast?.error?.("Te faltan tiras en uno o más productos"); return; }
-
-                        await confirmarPedidoConStock({
-                          pedidoId: pedido.id || pedidoId,
-                          usuarioId: user?.uid || "operario",
-                          items
-                        });
-
-                        await cambiarEstado(pedidoId, ESTADOS.PREPARADO);
-                        toast?.success?.("Pedido preparado");
-                      } catch (e) {
-                        console.error(e);
-                        toast?.error?.(e.message || "No se pudo confirmar la preparación");
-                      }
-                    }}
+                    onClick={finalizarPreparacion}
                     disabled={
                       !(pedido?.productos || []).every((it, i) => {
                         const k = keyFor(it, i);
@@ -590,6 +619,7 @@ export default function PedidoDetalleOperario() {
                   >
                     Finalizar preparación
                   </button>
+
                 </>
               )}
             </div>

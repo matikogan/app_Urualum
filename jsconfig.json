@@ -1,4 +1,4 @@
 {
   "compilerOptions": { "baseUrl": "src" },
-  "include": ["src"]
+  "include": ["src", "functions/finnegans"]
 }

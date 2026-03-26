@@ -1,369 +1,461 @@
-// src/modules/pedidos/pages/PedidosControladosVentas.js
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  collection,
-  query as q,
-  where,
-  orderBy,
-  limit,
-  startAfter,
-  onSnapshot,
-  getDocs,
-} from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../../../firebase";
-import { useAuth } from "context/AuthContext";
-import { Link } from "react-router-dom";
+import { norm } from "utils/text";
+import SearchBar from "../components/SearchBar";
 
-const METODOS = ["AGENCIA", "RETIRA", "CAMION", "GIRA"];
-const PAGE = 25;
+/* ===================== helpers de fecha ===================== */
 
-const norm = (s) =>
-  (s || "")
-    .toString()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+function getPedidoDate(p) {
+  if (p?.finFechaTS?.seconds) return new Date(p.finFechaTS.seconds * 1000);
+  if (p?.finFecha) return new Date(`${p.finFecha}T00:00:00`);
+  if (p?.timestamps?.creado?.seconds)
+    return new Date(p.timestamps.creado.seconds * 1000);
+  return null;
+}
+
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function daysDiff(a, b) {
+  const ms = startOfDay(a).getTime() - startOfDay(b).getTime();
+  return Math.round(ms / 86400000);
+}
+
+const BUCKET_ORDER = ["HOY", "AYER", "ÚLTIMA SEMANA", "ÚLTIMO MES"];
+
+function bucketLabelByDate(d) {
+  if (!d) return "ÚLTIMO MES";
+  const today = new Date();
+  const diff = daysDiff(today, d);
+  if (diff === 0) return "HOY";
+  if (diff === 1) return "AYER";
+  if (diff <= 7) return "ÚLTIMA SEMANA";
+  return "ÚLTIMO MES";
+}
+
+/** { [estado]: { [bucket]: Pedido[] } } */
+function agruparPorEstadoYBucketFecha(pedidos) {
+  const out = {};
+  for (const p of pedidos) {
+    const estado = p?.estado || "CONTROLADO";
+    const d = getPedidoDate(p);
+    const bucket = bucketLabelByDate(d);
+
+    if (!out[estado]) out[estado] = {};
+    if (!out[estado][bucket]) out[estado][bucket] = [];
+    out[estado][bucket].push(p);
+  }
+
+  // ordenamos buckets por BUCKET_ORDER y pedidos por fecha desc
+  for (const estado of Object.keys(out)) {
+    for (const bucket of Object.keys(out[estado])) {
+      out[estado][bucket].sort((a, b) => {
+        const da = getPedidoDate(a)?.getTime() ?? 0;
+        const db = getPedidoDate(b)?.getTime() ?? 0;
+        return db - da;
+      });
+    }
+    const ordered = {};
+    for (const key of BUCKET_ORDER) {
+      if (out[estado][key]) ordered[key] = out[estado][key];
+    }
+    out[estado] = ordered;
+  }
+
+  return out;
+}
+
+/* ===================== helpers de pedidos ===================== */
+
+function getResponsable(p) {
+  return (
+    p?.asignadoNombre ||
+    p?.asignado?.nombre ||
+    p?.asignado?.displayName ||
+    p?.operarioNombre ||
+    p?.responsableNombre ||
+    p?.responsable?.nombre ||
+    null
+  );
+}
+
+const ESTADOS_VENTAS = ["CONTROLADO", "DESPACHADO"];
+
+const LABEL_BUCKET = {
+  HOY: "Hoy",
+  "AYER": "Ayer",
+  "ÚLTIMA SEMANA": "Última semana",
+  "ÚLTIMO MES": "Último mes",
+};
+
+const LABEL_ESTADO = {
+  CONTROLADO: "CONTROLADOS",
+  DESPACHADO: "DESPACHADOS",
+};
+
+/* ===================== componente principal ===================== */
 
 export default function PedidosControladosVentas() {
-  const { user, toast } = useAuth(); // <= NO dependemos de profile.role para montar
-
-  // datos
-  const [items, setItems] = useState([]);
+  const [pedidos, setPedidos] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // filtros
-  const [metodo, setMetodo] = useState(""); // "" = todos
-  const [qText, setQText] = useState("");
+  // NUEVO: pedidos despachados HOY desde la colección pedidos_despachados
+  const [despsHoy, setDespsHoy] = useState([]);
+
+
+  const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
 
-  // paginación
-  const [lastDoc, setLastDoc] = useState(null);
-  const [isEnd, setIsEnd] = useState(false);
+  // colapsables
+  const [collapsedStates, setCollapsedStates] = useState(() => new Set());
+  const [collapsedBuckets, setCollapsedBuckets] = useState(() => new Set());
 
-  // control de suscripción y modo de orden
-  const unsubRef = useRef(null);
-  const preferOrderByRef = useRef(true); // intentar con orderBy; si falla, pasamos a false
-
-  // debounce buscador
+  /* ---------- listener Firestore ---------- */
   useEffect(() => {
-    const id = setTimeout(() => setDebouncedQ(qText), 180);
+    const ref = collection(db, "pedidos");
+    // SOLO traer CONTROLADOS desde la colección pedidos
+    const qy = query(ref, where("estado", "==", "CONTROLADO"));
+
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        console.log("📦 CONTROLADOS desde colección pedidos:", list);
+        setPedidos(list);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("[Ventas] error escuchando pedidos:", err);
+        setLoading(false);
+      }
+    );
+
+
+
+    return () => unsub();
+  }, []);
+
+  /* ---------- listener a pedidos_despachados (solo HOY) ---------- */
+  useEffect(() => {
+    // inicio del día
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = today;  
+    const end = new Date(today);
+    end.setHours(23, 59, 59, 999);
+
+    const col = collection(db, "pedidos_despachados");
+    const qy = query(
+      col,
+      where("despachadoAt", ">=", start),
+      where("despachadoAt", "<=", end)
+    );
+
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data(), estado: "DESPACHADO" }));
+        console.log("🚚 DESPACHADOS HOY desde pedidos_despachados:", list);
+        setDespsHoy(list);
+      },
+      (err) => {
+        console.error("[Ventas] error escuchando pedidos_despachados:", err);
+      }
+    );
+
+
+
+    return () => unsub();
+  }, []);
+
+
+
+  /* ---------- debounce de búsqueda ---------- */
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQ(q), 200);
     return () => clearTimeout(id);
-  }, [qText]);
+  }, [q]);
 
-  // helper: construir query según preferencia
-  const buildBaseQuery = (useOrder) => {
-    const col = collection(db, "pedidos");
-    const parts = [where("estado", "==", "CONTROLADO")];
-    if (metodo) parts.push(where("metodoEntrega", "==", metodo));
-    if (useOrder) parts.push(orderBy("updatedAt", "desc"));
-    parts.push(limit(PAGE));
-    return q(col, ...parts);
-  };
-
-  // suscripción principal con fallback
-  useEffect(() => {
-    if (!user) {
-      setItems([]);
-      setLoading(true);
-      return;
-    }
-
-    // cerrar listener previo
-    if (unsubRef.current) {
-      unsubRef.current();
-      unsubRef.current = null;
-    }
-
-    setLoading(true);
-    setIsEnd(false);
-    setLastDoc(null);
-
-    // 1) intentamos con orderBy
-    const trySubscribe = (useOrder) => {
-      const qq = buildBaseQuery(useOrder);
-      const unsub = onSnapshot(
-        qq,
-        (snap) => {
-          // si preferíamos orderBy y devuelve 0 pero hay datos, luego paginación los recupera;
-          // igualmente si estamos en fallback (sin order), ordenamos en cliente
-          const docs = snap.docs.map((d) => ({ id: d.id, ...d.data(), _ref: d }));
-          if (!useOrder) {
-            docs.sort((a, b) => {
-              const ta = a?.updatedAt?.toMillis?.() ?? 0;
-              const tb = b?.updatedAt?.toMillis?.() ?? 0;
-              return tb - ta;
-            });
-          }
-          setItems(docs);
-          setLastDoc(snap.docs.at(-1) || null);
-          setIsEnd(snap.size < PAGE);
-          setLoading(false);
-        },
-        async (err) => {
-          // Si falla por índice u otro tema, hacemos fallback sin orderBy
-          if (err?.code === "failed-precondition" || err?.code === "permission-denied") {
-            // solo mostramos toast para info; el fallback arranca solo
-            if (err?.code === "failed-precondition") {
-              toast?.error?.("Falta crear un índice; se muestra sin orden por fecha.");
-            } else {
-              toast?.error?.("Permiso denegado para leer pedidos.");
-            }
-            // fallback: suscribir sin orderBy
-            preferOrderByRef.current = false;
-            setLoading(true);
-            if (unsubRef.current) {
-              unsubRef.current();
-              unsubRef.current = null;
-            }
-            // lanzar listener sin orderBy
-            const unsubFallback = onSnapshot(
-              buildBaseQuery(false),
-              (snap2) => {
-                const docs2 = snap2.docs.map((d) => ({ id: d.id, ...d.data(), _ref: d }));
-                docs2.sort((a, b) => {
-                  const ta = a?.updatedAt?.toMillis?.() ?? 0;
-                  const tb = b?.updatedAt?.toMillis?.() ?? 0;
-                  return tb - ta;
-                });
-                setItems(docs2);
-                setLastDoc(snap2.docs.at(-1) || null);
-                setIsEnd(snap2.size < PAGE);
-                setLoading(false);
-              },
-              (err2) => {
-                toast?.error?.("Error al cargar pedidos.");
-                setLoading(false);
-              }
-            );
-            unsubRef.current = unsubFallback;
-          } else {
-            toast?.error?.("Error al cargar pedidos.");
-            setLoading(false);
-          }
-        }
-      );
-      unsubRef.current = unsub;
-    };
-
-    trySubscribe(preferOrderByRef.current);
-
-    // cleanup
-    return () => {
-      if (unsubRef.current) {
-        unsubRef.current();
-        unsubRef.current = null;
-      }
-    };
-  }, [user?.uid, metodo, toast]); // <- NO dependemos de profile.role
-
-  // paginar (respeta fallback)
-  const loadMore = async () => {
-    if (!user) return;
-    if (loading || isEnd || !lastDoc) return;
-    try {
-      setLoading(true);
-      const col = collection(db, "pedidos");
-      const parts = [where("estado", "==", "CONTROLADO")];
-      if (metodo) parts.push(where("metodoEntrega", "==", metodo));
-      if (preferOrderByRef.current) parts.push(orderBy("updatedAt", "desc"));
-      parts.push(startAfter(lastDoc), limit(PAGE));
-
-      const snap = await getDocs(q(col, ...parts));
-      let docs = snap.docs.map((d) => ({ id: d.id, ...d.data(), _ref: d }));
-      if (!preferOrderByRef.current) {
-        docs.sort((a, b) => {
-          const ta = a?.updatedAt?.toMillis?.() ?? 0;
-          const tb = b?.updatedAt?.toMillis?.() ?? 0;
-          return tb - ta;
-        });
-      }
-      setItems((prev) => [...prev, ...docs]);
-      setLastDoc(snap.docs.at(-1) || null);
-      setIsEnd(snap.size < PAGE);
-    } catch (err) {
-      if (err?.code === "failed-precondition") {
-        // si paginar con order falla, hacemos un último intento sin order
-        try {
-          const snap2 = await getDocs(
-            q(
-              collection(db, "pedidos"),
-              where("estado", "==", "CONTROLADO"),
-              ...(metodo ? [where("metodoEntrega", "==", metodo)] : []),
-              startAfter(lastDoc),
-              limit(PAGE)
-            )
-          );
-          let docs2 = snap2.docs.map((d) => ({ id: d.id, ...d.data(), _ref: d }));
-          docs2.sort((a, b) => {
-            const ta = a?.updatedAt?.toMillis?.() ?? 0;
-            const tb = b?.updatedAt?.toMillis?.() ?? 0;
-            return tb - ta;
-          });
-          preferOrderByRef.current = false;
-          setItems((prev) => [...prev, ...docs2]);
-          setLastDoc(snap2.docs.at(-1) || null);
-          setIsEnd(snap2.size < PAGE);
-          toast?.error?.("Índice faltante. Paginando sin orden por fecha.");
-        } catch {
-          toast?.error?.("Falta crear un índice para paginación.");
-        }
-      } else {
-        toast?.error?.("Error al cargar más pedidos.");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // búsqueda local
-  const filtered = useMemo(() => {
+  /* ---------- filtro por búsqueda ---------- */
+  const pedidosFiltrados = useMemo(() => {
+    if (!debouncedQ) return pedidos;
     const nq = norm(debouncedQ);
-    if (!nq) return items;
-    return items.filter((p) => {
+
+    return pedidos.filter((p) => {
       const numero = norm(p.numero || p.id || "");
       const cliente = norm(p.cliente || "");
       const desc = norm(p.descripcion || "");
-      const m = norm(p.metodoEntrega || "");
+      const metodo = norm(p.metodoEntrega || "");
       return (
         numero.includes(nq) ||
         cliente.includes(nq) ||
         desc.includes(nq) ||
-        m.includes(nq)
+        metodo.includes(nq)
       );
     });
-  }, [items, debouncedQ]);
+  }, [pedidos, debouncedQ]);
 
-  const metodoBtnClass = (m) =>
-    `btn ${metodo === m ? "btn--primary" : "btn--outline"}`;
+  /* ---------- normalize estado + agrupar ---------- */
+  const pedidosEnriquecidos = useMemo(
+    () =>
+      (pedidosFiltrados || []).map((p) => {
+        const estado = String(p.estado || "").toUpperCase();
+        return { ...p, estado };
+      }),
+    [pedidosFiltrados]
+  );
 
-  // ---- Guards de render
-  if (user === null) {
+  const grupos = useMemo(
+    () => agruparPorEstadoYBucketFecha(pedidosEnriquecidos),
+    [pedidosEnriquecidos]
+  );
+
+  // → Inyectar DESPACHADOS HOY en los grupos
+  const gruposConDesp = useMemo(() => {
+    const g = { ...grupos };
+
+    if (despsHoy.length > 0) {
+      if (!g["DESPACHADO"]) g["DESPACHADO"] = {};
+      g["DESPACHADO"]["HOY"] = despsHoy;
+    }
+
+    return g;
+  }, [grupos, despsHoy]);
+
+
+  const estadosOrdenados = useMemo(() => {
+    const out = [];
+
+    for (const est of ESTADOS_VENTAS) {
+      const porFecha = gruposConDesp[est];
+      if (!porFecha) continue;
+      const total = Object.values(porFecha).reduce(
+        (acc, arr) => acc + arr.length,
+        0
+      );
+      if (total > 0) out.push([est, porFecha, total]);
+    }
+
+    return out;
+  }, [gruposConDesp]);
+
+  /* ===================== handlers UI ===================== */
+
+  function toggleEstado(estado) {
+    setCollapsedStates((prev) => {
+      const next = new Set(prev);
+      if (next.has(estado)) next.delete(estado);
+      else next.add(estado);
+      return next;
+    });
+  }
+
+  function toggleBucket(estado, bucket) {
+    const key = `${estado}::${bucket}`;
+    setCollapsedBuckets((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  /* ===================== render helpers ===================== */
+
+  function renderCard(p) {
     return (
-      <div className="p-3">
-        <div className="deck-head">
-          <div className="deck-title">Listos para despachar</div>
-          <span className="pill pill--brand">Ventas</span>
+      <a
+        key={p.id}
+        href={`/ventas/para-despachar/${encodeURIComponent(p.id)}`}
+        className="card order-card card--selectable"
+      >
+        <div className="order-head">
+          <div className="order-number">#{p.numero || p.id}</div>
+
+          {getResponsable(p) && (
+            <span className="pill pill--user" title="Responsable asignado">
+              {getResponsable(p)}
+            </span>
+          )}
+
+          <span className="pill pill--info">
+            {p.metodoEntrega || "—"}
+          </span>
         </div>
-        <p className="muted mt-3">No estás autenticado.</p>
-        <a className="btn btn--primary mt-2" href="/login">
-          Iniciar sesión
-        </a>
-      </div>
+
+        <div className="order-body">
+          <div className="order-field">
+            <span className="order-label">Fecha (Finnegans)</span>
+            <span className="order-value">{p.finFecha || "—"}</span>
+          </div>
+          <div className="order-field">
+            <span className="order-label">Cliente</span>
+            <span className="order-value">{p.cliente || "—"}</span>
+          </div>
+          <div className="order-field">
+            <span className="order-label">Depósito</span>
+            <span className="order-value">{p.deposito || "—"}</span>
+          </div>
+          {getResponsable(p) && (
+            <div className="order-field">
+              <span className="order-label">Responsable</span>
+              <span className="order-value">{getResponsable(p)}</span>
+            </div>
+          )}
+          <div className="order-field">
+            <span className="order-label">Ítems</span>
+            <span className="order-value">
+              {p.productos?.length ?? 0}
+            </span>
+          </div>
+          {p.bultos != null && (
+            <div className="order-field">
+              <span className="order-label">Bultos</span>
+              <span className="order-value">{p.bultos}</span>
+            </div>
+          )}
+          {p.paquetes != null && (
+            <div className="order-field">
+              <span className="order-label">Paquetes</span>
+              <span className="order-value">{p.paquetes}</span>
+            </div>
+          )}
+        </div>
+      </a>
     );
   }
 
-  // ---- UI final
+  /* ===================== render ===================== */
+
+  console.log("🔵 gruposConDesp:", gruposConDesp);
+  console.log("🟢 estadosOrdenados:", estadosOrdenados);
+
+
   return (
-    <div className="p-3">
-      {/* Encabezado */}
-      <div className="deck-head">
+    <div className="container">
+      {/* encabezado simple para PC */}
+      <div className="deck-head" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div className="deck-title">Listos para despachar</div>
-        <span className="pill pill--brand">Ventas</span>
+
+        <a
+          href="/ventas/despachados"
+          className="btn btn--small"
+          style={{ padding: "6px 12px", fontSize: 14 }}
+        >
+          Ver históricos
+        </a>
       </div>
 
-      {/* Filtros */}
-      <div className="filters">
-        <div className="filters-row">
-          <div className="searchbar">
-            <span className="searchbar__icon">🔎</span>
-            <input
-              className="searchbar__input"
-              placeholder="Buscar por #PEDVTA, cliente, método o descripción…"
-              value={qText}
-              onChange={(e) => setQText(e.target.value)}
-            />
-            {qText && (
-              <button
-                className="searchbar__clear"
-                title="Limpiar"
-                onClick={() => setQText("")}
-              >
-                ×
-              </button>
-            )}
-          </div>
-          <div />
-        </div>
 
-        <div className="filters-row">
-          <div className="methods-grid">
-            <button
-              className={metodo === "" ? "btn btn--primary" : "btn btn--outline"}
-              onClick={() => setMetodo("")}
-            >
-              Todos
-            </button>
-            {METODOS.map((m) => (
-              <button
-                key={m}
-                className={metodoBtnClass(m)}
-                onClick={() => setMetodo(m === metodo ? "" : m)}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* buscador igual al de pedidos.js */}
+      <div className="mt-2" style={{ marginBottom: 16 }}>
+        <SearchBar
+          value={q}
+          onChange={setQ}
+          onClear={() => setQ("")}
+          placeholder="Buscar por #PEDVTA, cliente, método o descripción…"
+        />
       </div>
 
-      {/* Estado de carga / vacío */}
-      {loading && <p className="muted mt-2">Cargando…</p>}
-      {!loading && filtered.length === 0 && (
-        <div className="card empty-card mt-2">
-          <div className="h2" style={{ margin: 0 }}>
-            Sin resultados
-          </div>
-          <p className="muted">No hay pedidos controlados para mostrar.</p>
+      {loading && (
+        <div className="card card--compact empty-card">
+          <div className="muted">Cargando pedidos…</div>
         </div>
       )}
 
-      {/* Lista */}
-      <div className="orders-grid">
-        {filtered.map((p) => {
-          const fecha =
-            p?.updatedAt?.toDate?.()?.toLocaleString?.() ||
-            p?.timestamps?.creado?.toDate?.()?.toLocaleString?.() ||
-            "—";
+      {!loading && estadosOrdenados.length === 0 && (
+        <div className="card card--compact empty-card">
+          <div className="muted">No hay pedidos para mostrar.</div>
+        </div>
+      )}
+
+      {!loading &&
+        estadosOrdenados.map(([estado, porFecha, totalEstado]) => {
+          const stateClass = `state--${estado
+            .toLowerCase()
+            .replaceAll("_", "-")}`;
+          const collapsedState = collapsedStates.has(estado);
+          const labelEstado = LABEL_ESTADO[estado] || estado;
+          
           return (
-            <Link
-              key={p.id}
-              to={`/ventas/para-despachar/${encodeURIComponent(p.id)}`}
-              className="card order-card card--selectable"
+            <section
+              key={estado}
+              className={`section section--state ${stateClass}`}
             >
-              <div className="order-head">
-                <div className="order-number">#{p.numero || p.id}</div>
-                <span className="pill pill--info">
-                  {p.metodoEntrega || "—"}
+              {/* Título del estado, clickeable para colapsar */}
+              <div
+                className="section-title section-title--state"
+                onClick={() => toggleEstado(estado)}
+                style={{ cursor: "pointer" }}
+              >
+                <span className="state-label">{labelEstado}</span>
+                <span className="state-count">{totalEstado}</span>
+                <span
+                  className="chev chev--sm"
+                  style={{
+                    display: "inline-block",
+                    transform: collapsedState ? "rotate(-90deg)" : "rotate(0deg)",
+                    transition: "transform .15s ease-in-out",
+                    marginLeft: 8,
+                  }}
+                >
+                  ⌄
                 </span>
               </div>
 
-              <div className="order-body">
-                <div className="order-field">
-                  <div className="order-label">Cliente</div>
-                  <div className="order-value">{p.cliente || "—"}</div>
+              {/* Buckets por fecha */}
+              {!collapsedState && (
+                <div className="section-children">
+                  {Object.entries(porFecha).map(([bucket, items]) => {
+                    const key = `${estado}::${bucket}`;
+                    const collapsedBucket = collapsedBuckets.has(key);
+                    const labelBucket = LABEL_BUCKET[bucket] || bucket;
+
+                    if (!items || items.length === 0) return null;
+
+                    return (
+                      <div key={bucket} className="subsection">
+                        <div
+                          className="subsection-title"
+                          onClick={() => toggleBucket(estado, bucket)}
+                          style={{ cursor: "pointer" }}
+                        >
+                          <span>{labelBucket}</span>
+                          <span className="muted">{items.length}</span>
+                          <span
+                            className="chev chev--sm"
+                            style={{
+                              display: "inline-block",
+                              transform: collapsedBucket
+                                ? "rotate(-90deg)"
+                                : "rotate(0deg)",
+                              transition: "transform .15s ease-in-out",
+                            }}
+                          >
+                            ⌄
+                          </span>
+                        </div>
+
+                        {!collapsedBucket && (
+                          <div className="subsection-body">
+                            <div className="orders-grid">
+                              {items.map((p) => renderCard(p))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="order-field">
-                  <div className="order-label">Depósito</div>
-                  <div className="order-value">{p.deposito || "—"}</div>
-                </div>
-                <div className="order-field">
-                  <div className="order-label">Actualizado</div>
-                  <div className="order-value">{fecha}</div>
-                </div>
-              </div>
-            </Link>
+              )}
+            </section>
           );
         })}
-      </div>
-
-      {/* Paginación */}
-      {!loading && !isEnd && (
-        <div className="btn-center" style={{ marginTop: 12 }}>
-          <button className="btn btn--secondary" onClick={loadMore}>
-            Cargar más
-          </button>
-        </div>
-      )}
     </div>
   );
 }
