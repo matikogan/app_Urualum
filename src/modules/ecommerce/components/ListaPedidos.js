@@ -10,10 +10,12 @@ export default function ListaPedidos({ pedidos, loading, onVolver }) {
 
   const renderEstadoPill = (estado) => {
     switch(estado) {
-        case "NUEVO": return <span className="pill pill--brand">🔵 Recibido</span>;
+        case "NUEVO":          return <span className="pill pill--brand">🔵 Recibido</span>;
         case "EN PREPARACION": return <span className="pill pill--warn">🟡 En Preparación</span>;
-        case "PREPARADO": return <span className="pill pill--ok">🟢 ¡Listo para retirar!</span>;
-        case "ERROR_STOCK": return <span className="pill pill--error">🔴 Diferencia de Stock</span>;
+        case "PREPARADO":      return <span className="pill pill--ok">🟢 ¡Listo para retirar!</span>;
+        case "ERROR_STOCK":    return <span className="pill pill--error">🔴 Diferencia de Stock</span>;
+        case "ENTREGADO":      return <span className="pill pill--info">✅ Entregado</span>;
+        case "CANCELADO":      return <span className="pill pill--error">🚫 Cancelado</span>;
         default: return <span className="pill">{estado}</span>;
     }
   };
@@ -138,7 +140,19 @@ export default function ListaPedidos({ pedidos, loading, onVolver }) {
 
                     {pedidoSeleccionado.estado === "ERROR_STOCK" && (
                         <div className="banner banner--error">
-                            ⚠️ Hemos encontrado una diferencia de stock en tu pedido. Un asesor se contactará contigo a la brevedad.
+                            <p className="font-bold">⚠️ Diferencia de stock en tu pedido</p>
+                            {pedidoSeleccionado.notaError ? (
+                                <p>{pedidoSeleccionado.notaError}</p>
+                            ) : (
+                                <p>Un asesor se contactará contigo a la brevedad.</p>
+                            )}
+                        </div>
+                    )}
+
+                    {pedidoSeleccionado.estado === "CANCELADO" && (
+                        <div className="banner banner--error">
+                            <p className="font-bold">🚫 Este pedido fue cancelado</p>
+                            {pedidoSeleccionado.notaError && <p>{pedidoSeleccionado.notaError}</p>}
                         </div>
                     )}
                     {/* 👆 FIN DE LAS VALIDACIONES 👆 */}
