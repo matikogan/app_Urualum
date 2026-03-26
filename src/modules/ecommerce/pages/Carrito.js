@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
-import { functions, db } from "../firebase";
-import { useApp } from "../context/AppContext";
-import { useAuth } from "../context/AuthContext";
+import { functions, db } from "../../../firebase";
+import { useApp } from "context/AppContext";
+import { useAuth } from "context/AuthContext";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import SelectorCantidad from "../components/SelectorCantidad";
+import SelectorCantidad from "modules/ecommerce/components/SelectorCantidad";
 
 export default function Carrito() {
   const navigate = useNavigate();
@@ -32,7 +32,6 @@ export default function Carrito() {
   const [itemABorrar, setItemABorrar] = useState(null); // Almacenamos el index del producto
 
 
-  // 1. CONFIGURACIÓN DE LÍMITES POR CÓDIGO
   const PRODUCTOS_LIMITADOS = ['502001901', '502001902', '502001903', '502001904'];
   const LIMITE_MAXIMO = 20;
 
@@ -79,10 +78,6 @@ export default function Carrito() {
 
             const infoPago = metodoPago === "Transferencia" ? `Transferencia (${bancoTransferencia})` : metodoPago;
             const descripcionPedido = `App Mobile V3 | Entrega: ${metodoEntrega} | Pago: ${infoPago} | Obs: ${observaciones}`;
-
-            // Console logs para depuración (iguales a los de tu captura)
-            console.log("PARTE 1 - ITEMS DESGLOSADOS (INTERNO):", itemsDesglosados);
-            console.log("PARTE 2 - PAYLOAD A FINNEGANS:", itemsFinnegans);
 
             const fn = httpsCallable(functions, "finnegansCrearPedidoVenta");
             const res = await fn({
@@ -144,10 +139,6 @@ export default function Carrito() {
     }
 
     const handleCambioCantidad = (index, valor, codigo) => {
-    // Definimos los productos con restricción de stock
-    const PRODUCTOS_LIMITADOS = ['502001901', '502001902', '502001903', '502001904'];
-    const LIMITE_MAXIMO = 20;
-
     let num = parseInt(valor);
     
     // Si el usuario borra el número, lo dejamos en blanco para que pueda escribir,
@@ -161,7 +152,6 @@ export default function Carrito() {
 
     // Aplicamos el límite de 20 unidades para los códigos específicos
     if (PRODUCTOS_LIMITADOS.includes(codigo) && num > LIMITE_MAXIMO) {
-        alert(`Atención: El producto ${codigo} tiene un límite de venta de ${LIMITE_MAXIMO} unidades por pedido.`);
         num = LIMITE_MAXIMO;
     }
 

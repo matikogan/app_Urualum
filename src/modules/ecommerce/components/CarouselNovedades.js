@@ -1,6 +1,6 @@
 import React from 'react';
-import imgPromo1 from '../novedades/Kit12_ventanas.jpeg'; 
-import imgPromo2 from '../novedades/Kit27_Ventanas.jpeg';
+import imgPromo1 from '../../../novedades/Kit12_ventanas.jpeg';
+import imgPromo2 from '../../../novedades/Kit27_Ventanas.jpeg';
 
 export default function CarouselNovedades({ onSeleccionarPromo }) {
   const novedades = [

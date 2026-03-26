@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
-import { db } from "../firebase";
-import { useAuth } from "../context/AuthContext";
-
-// 👇 AQUÍ ESTÁN LAS IMPORTACIONES CLAVE
-import PortalInicio from "../components/PortalInicio"; 
-import ListaPedidos from "../components/ListaPedidos";
+import { db } from "../../../firebase";
+import { useAuth } from "context/AuthContext";
+import PortalInicio from "modules/ecommerce/components/PortalInicio";
+import ListaPedidos from "modules/ecommerce/components/ListaPedidos";
 
 export default function MisPedidos() {
   const navigate = useNavigate();

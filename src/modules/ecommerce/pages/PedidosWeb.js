@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { collection, query, orderBy, where, onSnapshot, doc, updateDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { db, functions } from "../firebase";
-import { useAuth } from "../context/AuthContext";
+import { db, functions } from "../../../firebase";
+import { useAuth } from "context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 export default function PedidosWeb() {
@@ -46,13 +46,6 @@ export default function PedidosWeb() {
           fnStock({ productoCodigo: item.codigo, deposito: "RUTA8" }).catch(() => ({ data: { stock: [] } })),
           fnStock(payloadIsabela).catch(() => ({ data: { stock: [] } }))
         ]);
-
-        // 🔥 ESPÍAS FRONTEND (MACRO VISIÓN) 🔥
-        console.log(`=========================================`);
-        console.log(`📦 PRODUCTO: ${item.codigo}`);
-        console.log(`🔵 R8 CRUDO:`, resR8.data.stock);
-        console.log(`🟣 ISA CRUDO:`, resIsa.data.stock);
-        console.log(`=========================================`);
 
         const stockR8 = resR8.data.stock?.[0];
         const stockIsa = resIsa.data.stock?.[0];
@@ -139,8 +132,6 @@ export default function PedidosWeb() {
           </tbody>
         </table>
       </div>
-
-      // ... dentro de PedidosWeb.js en el bloque del modal seleccionado:
 
         {pedidoSeleccionado && (
         <div className="modal-backdrop">

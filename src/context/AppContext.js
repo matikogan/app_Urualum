@@ -1,4 +1,15 @@
-import { createContext, useContext, useState, useMemo } from "react";
+import { createContext, useContext, useState, useMemo, useEffect } from "react";
+
+const CARRITO_KEY = "urualum_carrito";
+
+function leerCarritoGuardado() {
+  try {
+    const guardado = localStorage.getItem(CARRITO_KEY);
+    return guardado ? JSON.parse(guardado) : [];
+  } catch {
+    return [];
+  }
+}
 
 // Si tenés un componente Toast por default, lo ignoramos aquí.
 // Proveemos un wrapper simple compatible con toast.success/error/info.
@@ -36,7 +47,12 @@ export function AppProvider({ children }) {
   const [clienteActivo, setClienteActivo] = useState(null);
 
   // Lógica del Carrito
-  const [carrito, setCarrito] = useState([]);
+  const [carrito, setCarrito] = useState(leerCarritoGuardado);
+
+  // Persistir en localStorage cada vez que el carrito cambia
+  useEffect(() => {
+    localStorage.setItem(CARRITO_KEY, JSON.stringify(carrito));
+  }, [carrito]);
 
   const agregarAlCarrito = (item) => setCarrito((prev) => [...prev, item]);
   

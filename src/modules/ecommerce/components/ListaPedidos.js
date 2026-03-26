@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import logo from "../logo-urualum.png";
-import { useApp } from "../context/AppContext"; // Importamos para usar agregarAlCarrito
+import logo from "../../../logo-urualum.png";
+import { useApp } from "context/AppContext";
 import { useNavigate } from "react-router-dom";
 
 export default function ListaPedidos({ pedidos, loading, onVolver }) {

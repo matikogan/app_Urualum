@@ -52,11 +52,10 @@ import ActitudCarga from "./pages/actitudCarga";
 import ReporteSemanal from "./pages/reporteSemanal";
 
 
-import Catalogo from "pages/Catalogo";
-import Carrito from "pages/Carrito";
-
-import PedidosWeb from "./pages/PedidosWeb"; // Ajustá la ruta según donde lo guardaste
-import MisPedidos from "pages/MisPedidos";
+import Catalogo from "modules/ecommerce/pages/Catalogo";
+import Carrito from "modules/ecommerce/pages/Carrito";
+import PedidosWeb from "modules/ecommerce/pages/PedidosWeb";
+import MisPedidos from "modules/ecommerce/pages/MisPedidos";
 
 // Registrar el Service Worker de Firebase Messaging manualmente
 if ("serviceWorker" in navigator) {
@@ -119,16 +118,6 @@ function SmartHome() {
 
   // De lo contrario, lo mandamos al "Inicio" de empleados (como siempre).
   return <Inicio />;
-}
-
-// ==========================================
-// COMPONENTES TEMPORALES (PRÓXIMAMENTE SERÁN ARCHIVOS)
-// ==========================================
-function CatalogoPlaceholder() {
-  return <div style={{padding: 40}}><h2>Catálogo (Próximamente)</h2><p>Estás en la ruta de compras.</p></div>;
-}
-function CarritoPlaceholder() {
-  return <div style={{padding: 40}}><h2>Carrito (Próximamente)</h2><p>Estás en la ruta del carrito.</p></div>;
 }
 
 // ==========================================

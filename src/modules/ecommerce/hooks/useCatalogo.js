@@ -7,15 +7,15 @@ import { useState, useEffect } from "react";
 import { httpsCallable } from "firebase/functions";
 import { doc, getDoc, collection, getDocs, query, where, limit } from "firebase/firestore";
 
-import { functions, db } from "../firebase";
-import { calcularPrecioFinal } from "../utils/priceCalculator";
-import { useApp } from "../context/AppContext";
-import { useAuth } from "../context/AuthContext";
+import { functions, db } from "../../../firebase";
+import { calcularPrecioFinal } from "modules/ecommerce/services/priceCalculator";
+import { useApp } from "context/AppContext";
+import { useAuth } from "context/AuthContext";
 import {
     KITS_VIRTUALES,
     PRODUCTOS_EN_OFERTA,
     MENU_ESTRUCTURA,
-} from "../pages/catalogoConfig";
+} from "modules/ecommerce/pages/catalogoConfig";
 
 export function useCatalogo() {
     const { profile } = useAuth();
@@ -56,8 +56,7 @@ export function useCatalogo() {
             if (!codigoUsar) return;
 
             try {
-                const fn = httpsCallable(functions, "finnegansGetCliente");
-                const res = await fn({ codigo: codigoUsar });
+                const res = await httpsCallable(functions, "finnegansGetCliente")({ codigo: codigoUsar });
                 const listaCod = res.data.cliente?.ListaPrecioDefaultCodigo;
 
                 if (listaCod) {

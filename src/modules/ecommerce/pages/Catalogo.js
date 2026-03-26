@@ -1,11 +1,11 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { useCatalogo } from "../hooks/useCatalogo";
-import { MENU_ESTRUCTURA, MAPA_COLORES, PRODUCTOS_EN_OFERTA } from "./catalogoConfig";
-import CarouselNovedades from "../components/CarouselNovedades";
-import ProductModal from "../components/ProductModal";
-import ProductCard from "../components/ProductCard";
+import { useAuth } from "context/AuthContext";
+import { useCatalogo } from "modules/ecommerce/hooks/useCatalogo";
+import { MENU_ESTRUCTURA, MAPA_COLORES, PRODUCTOS_EN_OFERTA } from "modules/ecommerce/pages/catalogoConfig";
+import CarouselNovedades from "modules/ecommerce/components/CarouselNovedades";
+import ProductModal from "modules/ecommerce/components/ProductModal";
+import ProductCard from "modules/ecommerce/components/ProductCard";
 
 export default function Catalogo() {
     const navigate = useNavigate();

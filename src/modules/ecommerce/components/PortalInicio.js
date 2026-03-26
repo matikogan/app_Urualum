@@ -1,7 +1,7 @@
 import React, {useState} from "react";
-import logo from "../logo-urualum.png";
-import { useAuth } from "../context/AuthContext"; 
-import { auth } from "../firebase"; 
+import logo from "../../../logo-urualum.png";
+import { useAuth } from "context/AuthContext";
+import { auth } from "../../../firebase";
 import { signOut } from "firebase/auth";
 
 export default function PortalInicio({ onVerPedidos, onCrearPedido, nombreUsuario, cantidadPedidos }) {
