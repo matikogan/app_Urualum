@@ -2730,7 +2730,14 @@ select.w-full.border.rounded {
 }
 
 /* C10: Chips horizontales en mobile con fade derecho */
-.sf-filters-wrap { position: relative; }
+.sf-filters-wrap { position: relative; display: flex; flex-direction: column; gap: 0; }
+
+/* Fila de colores: separador visual sutil respecto a la fila de categorías */
+.sf-filters-bar--colors {
+  padding-top: 6px;
+  border-top: 0.5px solid #f1f5f9;
+  margin-top: 2px;
+}
 @media (max-width: 599px) {
   .sf-filters-bar {
     flex-wrap: nowrap;

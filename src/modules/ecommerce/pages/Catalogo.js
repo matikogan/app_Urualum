@@ -65,42 +65,52 @@ export default function Catalogo() {
                 )}
             </div>
 
-            {/* C10: Wrapper con fade derecho para indicar scroll en mobile */}
+            {/* Filtros en dos filas: fila 1 = categorías, fila 2 = colores */}
             <div className="sf-filters-wrap">
-            <div className="sf-filters-bar">
-                <span className="sf-filter-label">Filtrar:</span>
 
-                {!filtroPadre && MENU_ESTRUCTURA.map(cat => (
-                    <button key={cat.nombre} className="sf-chip" onClick={() => toggleFiltroPadre(cat.nombre)}>
-                        {cat.nombre}
-                    </button>
-                ))}
+                {/* Fila 1: Padre + Rama1 */}
+                <div className="sf-filters-bar">
+                    <span className="sf-filter-label">Filtrar:</span>
 
-                {filtroPadre && (
-                    <button className="sf-chip sf-chip--active" onClick={() => toggleFiltroPadre(filtroPadre)}>
-                        {filtroPadre} <span className="sf-chip-x">×</span>
-                    </button>
-                )}
+                    {!filtroPadre && MENU_ESTRUCTURA.map(cat => (
+                        <button key={cat.nombre} className="sf-chip" onClick={() => toggleFiltroPadre(cat.nombre)}>
+                            {cat.nombre}
+                        </button>
+                    ))}
 
-                {filtroPadre && subcategoriasActivas.length > 0 && (
-                    <>
-                        <span className="sf-sep">|</span>
-                        {subcategoriasActivas.map(sub => (
-                            <button
-                                key={sub.nombre}
-                                className={`sf-chip ${filtroRama1 === sub.nombre ? "sf-chip--active" : ""}`}
-                                onClick={() => toggleFiltroRama1(sub.nombre)}
-                            >
-                                {sub.nombre}
-                                {filtroRama1 === sub.nombre && <span className="sf-chip-x">×</span>}
-                            </button>
-                        ))}
-                    </>
-                )}
+                    {filtroPadre && (
+                        <button className="sf-chip sf-chip--active" onClick={() => toggleFiltroPadre(filtroPadre)}>
+                            {filtroPadre} <span className="sf-chip-x">×</span>
+                        </button>
+                    )}
 
+                    {filtroPadre && subcategoriasActivas.length > 0 && (
+                        <>
+                            <span className="sf-sep">|</span>
+                            {subcategoriasActivas.map(sub => (
+                                <button
+                                    key={sub.nombre}
+                                    className={`sf-chip ${filtroRama1 === sub.nombre ? "sf-chip--active" : ""}`}
+                                    onClick={() => toggleFiltroRama1(sub.nombre)}
+                                >
+                                    {sub.nombre}
+                                    {filtroRama1 === sub.nombre && <span className="sf-chip-x">×</span>}
+                                </button>
+                            ))}
+                        </>
+                    )}
+
+                    {(filtroPadre || filtroColor) && (
+                        <button className="sf-chip sf-chip--clear" onClick={limpiarFiltros}>
+                            Limpiar todo
+                        </button>
+                    )}
+                </div>
+
+                {/* Fila 2: Colores — aparece debajo solo cuando hay colores disponibles */}
                 {filtroRama1 && coloresActivos.length > 0 && (
-                    <>
-                        <span className="sf-sep">|</span>
+                    <div className="sf-filters-bar sf-filters-bar--colors">
+                        <span className="sf-filter-label">Color:</span>
                         {coloresActivos.map(col => (
                             <button
                                 key={col}
@@ -111,15 +121,9 @@ export default function Catalogo() {
                                 {filtroColor === col && <span className="sf-chip-x">×</span>}
                             </button>
                         ))}
-                    </>
+                    </div>
                 )}
 
-                {(filtroPadre || filtroColor) && (
-                    <button className="sf-chip sf-chip--clear" onClick={limpiarFiltros}>
-                        Limpiar todo
-                    </button>
-                )}
-            </div>
             </div> {/* cierre sf-filters-wrap */}
 
             {/* ── Contador de resultados ── */}
