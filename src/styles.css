@@ -2411,3 +2411,345 @@ select.w-full.border.rounded {
   margin-bottom: 12px; letter-spacing: 0.03em;
 }
 .sf-results-count strong { color: #334155; }
+
+/* ============================================================
+   MEJORAS UX/UI — VISTA CLIENTE (C1–C10)
+   ============================================================ */
+
+/* C1: iOS Safari viewport fix */
+.portal-fullscreen {
+  height: 100svh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.screen-full-height {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: var(--space-2);
+  overflow: hidden;
+}
+
+/* C2: Badge de urgencia en botón MIS PEDIDOS */
+.btn-pedidos-wrapper {
+  position: relative;
+  width: 100%;
+}
+.urgencia-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 22px;
+  height: 22px;
+  background: #e53935;
+  color: #fff;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  box-shadow: 0 0 0 3px #fff;
+  animation: urgencia-pulse 2s infinite;
+  pointer-events: none;
+}
+@keyframes urgencia-pulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.12); }
+}
+
+/* C3: Card PREPARADO destacada */
+.order-card--preparado {
+  border: 1.5px solid #4caf50 !important;
+  background: #f0fdf4 !important;
+  box-shadow: 0 4px 16px rgba(76, 175, 80, 0.12) !important;
+}
+.order-card--preparado .order-number { color: #2e7d32; }
+
+.order-card--error {
+  border: 1.5px solid #f44336 !important;
+  background: #fff5f5 !important;
+}
+
+/* C4: Meta info de la card (entrega + ítems) */
+.order-card-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+.order-card-hint {
+  margin-top: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-radius: 8px;
+  line-height: 1.4;
+}
+.order-card-hint--preparado {
+  background: #dcfce7;
+  color: #166534;
+  border: 0.5px solid #bbf7d0;
+}
+.order-card-hint--error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 0.5px solid #fecaca;
+}
+
+/* C5: Vista de detalle full-screen */
+.pedido-detalle { padding-bottom: 80px; }
+
+.pedido-detalle__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 10;
+}
+.pedido-detalle__back {
+  background: #f1f5f9;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.pedido-detalle__back:active { background: #e2e8f0; }
+.pedido-detalle__title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+  flex: 1;
+}
+
+.pedido-detalle__info {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 12px 0;
+}
+.detalle-info-item {
+  display: flex;
+  flex-direction: column;
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 0.5px solid #e9eef5;
+}
+.detalle-info-item__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+.detalle-info-item__value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.pedido-items-list { display: flex; flex-direction: column; }
+.pedido-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 12px 0;
+  border-bottom: 0.5px solid #f1f5f9;
+  gap: 8px;
+}
+.pedido-item-row:last-child { border-bottom: none; }
+.pedido-item-row__desc {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.35;
+}
+.pedido-item-row__sku { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+.pedido-item-row__precio {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  white-space: nowrap;
+  text-align: right;
+}
+.pedido-item-row__cant { font-size: 11px; color: #94a3b8; text-align: right; }
+
+.pedido-detalle__total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-top: 16px;
+  border: 0.5px solid #e2e8f0;
+}
+.pedido-detalle__total-label { font-size: 13px; font-weight: 600; color: #64748b; }
+.pedido-detalle__total-valor { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; }
+
+/* C6: Datos bancarios copiables */
+.banco-section__titulo {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin: 16px 0 8px;
+}
+.copy-box {
+  background: #fff;
+  border: 0.5px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.copy-box__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+.copy-box__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.copy-box__valor {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  flex: 1;
+  word-break: break-all;
+}
+.copy-box__btn {
+  border: none;
+  background: #f1f5f9;
+  color: #475569;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+  font-family: inherit;
+}
+.copy-box__btn:hover { background: #e2e8f0; }
+.copy-box__btn--copiado { background: #dcfce7; color: #166534; }
+
+.pago-instrucciones {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin: 12px 0;
+}
+.pago-instrucciones__titulo { font-size: 14px; font-weight: 700; color: #166534; margin-bottom: 4px; }
+.pago-instrucciones__sub { font-size: 13px; color: #166534; margin-bottom: 12px; opacity: 0.8; }
+.pago-wsp-aviso {
+  margin-top: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fffbeb;
+  border: 0.5px solid #fde68a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  line-height: 1.4;
+}
+
+/* C7: Modal de confirmación personalizado */
+.modal-confirm__icon { font-size: 36px; text-align: center; margin-bottom: 6px; }
+.modal-confirm__title { font-size: 17px; font-weight: 700; text-align: center; color: #0f172a; margin: 0 0 8px; }
+.modal-confirm__body { font-size: 14px; color: #64748b; text-align: center; line-height: 1.5; margin: 0 0 16px; }
+.modal-confirm__actions { display: flex; flex-direction: column; gap: 8px; }
+
+/* C8: FAB carrito flotante */
+.fab-cart {
+  position: fixed;
+  bottom: 24px;
+  right: 20px;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0f172a;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 14px 20px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.fab-cart:active {
+  transform: scale(0.96);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.fab-cart--active { background: var(--ok); }
+.fab-cart__count {
+  background: rgba(255,255,255,0.25);
+  border-radius: 999px;
+  min-width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 0 5px;
+}
+
+/* C10: Chips horizontales en mobile con fade derecho */
+.sf-filters-wrap { position: relative; }
+@media (max-width: 599px) {
+  .sf-filters-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+    margin-right: -20px;
+    padding-right: 20px;
+  }
+  .sf-filters-bar::-webkit-scrollbar { display: none; }
+  .sf-filters-wrap::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 4px;
+    width: 40px;
+    background: linear-gradient(to right, transparent, #fff);
+    pointer-events: none;
+  }
+}

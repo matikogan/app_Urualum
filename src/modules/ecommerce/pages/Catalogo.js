@@ -30,19 +30,25 @@ export default function Catalogo() {
     } = useCatalogo();
 
     return (
-        <div className="container" style={{ minHeight: "100vh", paddingBottom: "80px" }}>
+        <div className="container" style={{ minHeight: "100vh", paddingBottom: "100px" }}>
 
             {/* ── Topbar ── */}
-            <header className="topbar card" style={{ marginBottom: "var(--space-2)", gap: "10px" }}>
+            <header className="topbar card" style={{ marginBottom: "var(--space-2)" }}>
                 <button onClick={() => navigate("/inicio")} className="btn btn--secondary nav-back">← Inicio</button>
-                <button
-                    onClick={() => navigate("/carrito")}
-                    className={`btn ${carrito.length > 0 ? "btn--primary" : "btn--secondary"}`}
-                    style={{ margin: 0, borderRadius: "20px", minWidth: "70px", padding: "8px 12px" }}
-                >
-                    🛒 {carrito.length > 0 ? carrito.length : "0"}
-                </button>
+                <span style={{ fontSize: "14px", fontWeight: 600, color: "#94a3b8" }}>Catálogo</span>
             </header>
+
+            {/* C8: FAB flotante del carrito — reemplaza el botón del topbar */}
+            <button
+                className={`fab-cart ${carrito.length > 0 ? "fab-cart--active" : ""}`}
+                onClick={() => navigate("/carrito")}
+                aria-label={`Ver carrito (${carrito.length} ítems)`}
+            >
+                🛒
+                {carrito.length > 0 && (
+                    <span className="fab-cart__count">{carrito.length}</span>
+                )}
+            </button>
 
             {/* ── Buscador ── */}
             <div style={{ position: "relative", marginBottom: "12px" }}>
@@ -59,7 +65,8 @@ export default function Catalogo() {
                 )}
             </div>
 
-            {/* ── Chips de filtro ── */}
+            {/* C10: Wrapper con fade derecho para indicar scroll en mobile */}
+            <div className="sf-filters-wrap">
             <div className="sf-filters-bar">
                 <span className="sf-filter-label">Filtrar:</span>
 
@@ -113,6 +120,7 @@ export default function Catalogo() {
                     </button>
                 )}
             </div>
+            </div> {/* cierre sf-filters-wrap */}
 
             {/* ── Contador de resultados ── */}
             {(busqueda || filtroPadre) && (

@@ -43,12 +43,18 @@ export default function MisPedidos() {
     );
   }
 
+  // Pedidos que requieren atención inmediata del cliente
+  const pedidosUrgentes = pedidos.filter(
+    p => ["PREPARADO", "ERROR_STOCK"].includes(p.estado)
+  ).length;
+
   return (
-    <PortalInicio 
-      onVerPedidos={() => setMostrarLista(true)} 
+    <PortalInicio
+      onVerPedidos={() => setMostrarLista(true)}
       onCrearPedido={() => navigate("/catalogo")}
       nombreUsuario={profile?.nombre || profile?.email}
       cantidadPedidos={pedidos.length}
+      pedidosUrgentes={pedidosUrgentes}
     />
   );
 }
