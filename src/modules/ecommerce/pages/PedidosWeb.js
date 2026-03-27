@@ -1,33 +1,64 @@
 import React, { useState, useEffect } from "react";
-import { collection, query, orderBy, where, onSnapshot, doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import {
+  collection, query, orderBy, where,
+  onSnapshot, doc, updateDoc, serverTimestamp,
+} from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../../../firebase";
 import { useAuth } from "context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 const ESTADOS_ACTIVOS = ["NUEVO", "EN PREPARACION", "ERROR_STOCK"];
+// V8: orden de prioridad para el sort por estado
+const ORDEN_ESTADOS = ["NUEVO", "ERROR_STOCK", "EN PREPARACION", "PREPARADO", "ENTREGADO", "CANCELADO"];
+
+// ── Helper: pill de estado ───────────────────────────────────
+function EstadoPill({ estado }) {
+  const cfg = {
+    "NUEVO":          { cls: "pill--brand", label: "NUEVO" },
+    "EN PREPARACION": { cls: "pill--warn",  label: "EN PREP." },
+    "PREPARADO":      { cls: "pill--ok",    label: "PREPARADO" },
+    "ERROR_STOCK":    { cls: "pill--error", label: "ERROR STOCK" },
+    "ENTREGADO":      { cls: "pill--info",  label: "ENTREGADO" },
+    "CANCELADO":      { cls: "pill--error", label: "CANCELADO" },
+  };
+  const c = cfg[estado] || { cls: "pill--info", label: estado };
+  return <span className={`pill ${c.cls}`} style={{ fontSize: "12px", padding: "4px 8px" }}>{c.label}</span>;
+}
+
+// ── V8: Flecha de ordenamiento ───────────────────────────────
+function SortArrow({ col, sortCol, sortDir }) {
+  const active = sortCol === col;
+  return (
+    <span className={`sort-arrow ${active ? "sort-arrow--active" : ""}`}>
+      {active ? (sortDir === "desc" ? "↓" : "↑") : "↕"}
+    </span>
+  );
+}
 
 export default function PedidosWeb() {
   const { profile } = useAuth();
   const navigate = useNavigate();
-  const [pedidos, setPedidos] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filtro, setFiltro] = useState("activos");
+
+  const [pedidos, setPedidos]           = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [filtro, setFiltro]             = useState("activos");
 
   const [pedidoSeleccionado, setPedidoSeleccionado] = useState(null);
-  const [stockPorProducto, setStockPorProducto] = useState({});
-  const [loadingStock, setLoadingStock] = useState(false);
+  const [stockPorProducto, setStockPorProducto]     = useState({});
+  const [loadingStock, setLoadingStock]             = useState(false);
 
   const [mostrandoFormError, setMostrandoFormError] = useState(false);
-  const [notaError, setNotaError] = useState("");
+  const [notaError, setNotaError]       = useState("");
+  const [errorNotaMsg, setErrorNotaMsg] = useState(""); // V4: reemplaza alert()
 
-  const [toastMsg, setToastMsg] = useState(null);
+  const [toastMsg, setToastMsg]         = useState(null);
 
-  const mostrarToast = (msg, tipo = "ok") => {
-    setToastMsg({ msg, tipo });
-    setTimeout(() => setToastMsg(null), 3000);
-  };
+  // V8: estado de ordenamiento
+  const [sortCol, setSortCol] = useState("fecha");
+  const [sortDir, setSortDir] = useState("desc");
 
+  // ── Datos en tiempo real ─────────────────────────────────
   useEffect(() => {
     if (!profile?.deposito) return;
     const q = query(
@@ -42,10 +73,22 @@ export default function PedidosWeb() {
     return () => unsub();
   }, [profile?.deposito]);
 
+  // ── Toast ────────────────────────────────────────────────
+  const mostrarToast = (msg, tipo = "ok") => {
+    setToastMsg({ msg, tipo });
+    setTimeout(() => setToastMsg(null), 3000);
+  };
+
+  // ── Abrir gestión de pedido (toggle si ya está abierto) ──
   const abrirGestion = async (pedido) => {
+    if (pedidoSeleccionado?.id === pedido.id) {
+      setPedidoSeleccionado(null);
+      return;
+    }
     setPedidoSeleccionado(pedido);
     setMostrandoFormError(false);
     setNotaError("");
+    setErrorNotaMsg("");
     setLoadingStock(true);
     const nuevosStocks = {};
     try {
@@ -53,47 +96,53 @@ export default function PedidosWeb() {
       await Promise.all(pedido.items.map(async (item) => {
         const [resR8, resIsa] = await Promise.all([
           fnStock({ productoCodigo: item.codigo, deposito: "RUTA8" }).catch(() => ({ data: { stock: [] } })),
-          fnStock({ productoCodigo: item.codigo, deposito: "ISABELA" }).catch(() => ({ data: { stock: [] } }))
+          fnStock({ productoCodigo: item.codigo, deposito: "ISABELA" }).catch(() => ({ data: { stock: [] } })),
         ]);
-        const stockR8 = resR8.data.stock?.[0];
+        const stockR8  = resR8.data.stock?.[0];
         const stockIsa = resIsa.data.stock?.[0];
         nuevosStocks[item.codigo] = {
           r8: stockR8?.Cantidad || 0,
           isa: stockIsa?.Cantidad || 0,
-          nombreFinnegans: stockR8?.ProductoNombre || stockIsa?.ProductoNombre || item.descripcion
+          nombreFinnegans: stockR8?.ProductoNombre || stockIsa?.ProductoNombre || item.descripcion,
         };
       }));
       setStockPorProducto(nuevosStocks);
-    } catch (error) {
-      console.error("Error consultando stocks:", error);
+    } catch (err) {
+      console.error("Error consultando stocks:", err);
     } finally {
       setLoadingStock(false);
     }
   };
 
+  // ── Cambiar estado en Firestore ──────────────────────────
   const cambiarEstado = async (id, nuevoEstado, extra = {}) => {
     try {
       await updateDoc(doc(db, "pedidos_web", id), {
         estado: nuevoEstado,
         gestionadoPor: profile.email,
         fechaUltimaAccion: serverTimestamp(),
-        ...extra
+        ...extra,
       });
       setPedidoSeleccionado(null);
       mostrarToast(`Pedido marcado como: ${nuevoEstado}`);
-    } catch (error) {
-      alert("Error al actualizar estado.");
+    } catch {
+      mostrarToast("Error al actualizar el estado.", "error");
     }
   };
 
+  // ── V4: Confirmar error con validación inline ────────────
   const confirmarError = () => {
-    if (!notaError.trim()) return alert("Por favor describí el problema antes de confirmar.");
+    if (!notaError.trim()) {
+      setErrorNotaMsg("Por favor describí el problema antes de confirmar.");
+      return;
+    }
+    setErrorNotaMsg("");
     cambiarEstado(pedidoSeleccionado.id, "ERROR_STOCK", { notaError });
     setMostrandoFormError(false);
     setNotaError("");
   };
 
-  // Devuelve el stock del depósito correspondiente al pedido
+  // ── Stock relevante según depósito del pedido ────────────
   const getStockRelevante = (codigo) => {
     if (!pedidoSeleccionado) return null;
     const stock = stockPorProducto[codigo];
@@ -101,338 +150,435 @@ export default function PedidosWeb() {
     return pedidoSeleccionado.depositoAsignado === "ISABELA" ? stock.isa : stock.r8;
   };
 
-  const renderEstadoPill = (estado) => {
-    const config = {
-      "NUEVO":          { cls: "pill--brand", label: "NUEVO" },
-      "EN PREPARACION": { cls: "pill--warn",  label: "EN PREPARACION" },
-      "PREPARADO":      { cls: "pill--ok",    label: "PREPARADO" },
-      "ERROR_STOCK":    { cls: "pill--error", label: "ERROR STOCK" },
-      "ENTREGADO":      { cls: "pill--info",  label: "ENTREGADO" },
-      "CANCELADO":      { cls: "pill--error", label: "CANCELADO" },
-    };
-    const c = config[estado] || { cls: "pill--info", label: estado || "NUEVO" };
-    return <span className={`pill ${c.cls}`}>{c.label}</span>;
+  // ── V8: Toggle de columna de ordenamiento ────────────────
+  const toggleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === "desc" ? "asc" : "desc");
+    else { setSortCol(col); setSortDir("desc"); }
   };
 
-  const claseFilaEstado = (estado) => {
-    if (estado === "NUEVO") return "row--nuevo";
-    if (estado === "EN PREPARACION") return "row--preparacion";
-    if (estado === "ERROR_STOCK") return "row--error";
-    if (estado === "ENTREGADO" || estado === "CANCELADO") return "muted";
-    return "";
+  // ── Filtrado + ordenamiento ──────────────────────────────
+  const pedidosFiltrados = (
+    filtro === "activos"
+      ? pedidos.filter(p => ESTADOS_ACTIVOS.includes(p.estado))
+      : pedidos
+  ).slice().sort((a, b) => {
+    if (sortCol === "fecha") {
+      const fa = a.fecha?.toDate?.() || new Date(0);
+      const fb = b.fecha?.toDate?.() || new Date(0);
+      return sortDir === "desc" ? fb - fa : fa - fb;
+    }
+    if (sortCol === "estado") {
+      const ia = ORDEN_ESTADOS.indexOf(a.estado);
+      const ib = ORDEN_ESTADOS.indexOf(b.estado);
+      return sortDir === "desc" ? ia - ib : ib - ia;
+    }
+    if (sortCol === "total") {
+      return sortDir === "desc" ? (b.total || 0) - (a.total || 0) : (a.total || 0) - (b.total || 0);
+    }
+    return 0;
+  });
+
+  // ── V3: Breakdown de estados para el header ──────────────
+  const cantNuevo = pedidos.filter(p => p.estado === "NUEVO").length;
+  const cantPrep  = pedidos.filter(p => p.estado === "EN PREPARACION").length;
+  const cantError = pedidos.filter(p => p.estado === "ERROR_STOCK").length;
+
+  // ── Clase de fila ────────────────────────────────────────
+  const claseFilaEstado = (estado, isSelected) => {
+    const base =
+      estado === "NUEVO"          ? "row--nuevo"       :
+      estado === "EN PREPARACION" ? "row--preparacion" :
+      estado === "ERROR_STOCK"    ? "row--error"       :
+      ["ENTREGADO", "CANCELADO"].includes(estado) ? "row--inactivo" : "";
+    return isSelected ? `${base} row--seleccionado` : base;
   };
-
-  const pedidosFiltrados = filtro === "activos"
-    ? pedidos.filter(p => ESTADOS_ACTIVOS.includes(p.estado))
-    : pedidos;
-
-  const cantidadActivos = pedidos.filter(p => ["NUEVO", "EN PREPARACION"].includes(p.estado)).length;
 
   if (loading) return <div className="container screen-center">⏳ Cargando buzón...</div>;
 
   return (
-    <div className="container">
+    <div className="container" style={{ paddingBottom: 0 }}>
 
-      {/* TOAST */}
+      {/* Toast de feedback */}
       {toastMsg && (
-        <div style={{
-          position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)',
+        <div className="toast" style={{
           background: toastMsg.tipo === "ok" ? "var(--ok)" : "var(--error)",
-          color: '#fff', padding: '12px 24px', borderRadius: '8px', zIndex: 9999,
-          fontWeight: 'bold', boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
         }}>
           {toastMsg.msg}
         </div>
       )}
 
-      <header className="topbar card">
-        <button
-          onClick={() => navigate("/")}
-          className="btn btn--ghost"
-          style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '5px' }}
-        >
-          ⬅️ Volver
+      {/* ── V3: Topbar con breakdown por estado ── */}
+      <header className="topbar card" style={{ marginBottom: "12px" }}>
+        <button onClick={() => navigate("/")} className="btn btn--ghost btn-sm">
+          ⬅ Volver
         </button>
-        <h1 className="h1">📦 Buzón Web — {profile?.deposito}</h1>
-        <span className="pill pill--brand">{cantidadActivos} Activos</span>
+        <h1 className="h1" style={{ margin: 0, fontSize: "18px" }}>
+          📦 Buzón Web — {profile?.deposito}
+        </h1>
+        <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+          {cantNuevo > 0  && <span className="pill pill--brand">{cantNuevo} Nuevo{cantNuevo !== 1 ? "s" : ""}</span>}
+          {cantPrep  > 0  && <span className="pill pill--warn">{cantPrep} En Prep.</span>}
+          {cantError > 0  && <span className="pill pill--error">{cantError} Error{cantError !== 1 ? "es" : ""}</span>}
+          {cantNuevo === 0 && cantPrep === 0 && cantError === 0 && (
+            <span className="pill pill--ok">✓ Al día</span>
+          )}
+        </div>
       </header>
 
-      {/* FILTRO TABS */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-        <button
-          onClick={() => setFiltro("activos")}
-          className={`btn btn-sm ${filtro === "activos" ? "btn--primary" : "btn--ghost"}`}
-        >
-          Activos ({pedidos.filter(p => ESTADOS_ACTIVOS.includes(p.estado)).length})
-        </button>
-        <button
-          onClick={() => setFiltro("todos")}
-          className={`btn btn-sm ${filtro === "todos" ? "btn--primary" : "btn--ghost"}`}
-        >
-          Todos ({pedidos.length})
-        </button>
-      </div>
+      {/* ── V5: Layout 2 columnas ── */}
+      <div className="pedidosweb-layout">
 
-      <div className="card table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>ID Finnegans</th>
-              <th>Cliente</th>
-              <th>Fecha</th>
-              <th>Total</th>
-              <th>Estado</th>
-              <th>Acción</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pedidosFiltrados.map(p => (
-              <tr
-                key={p.id}
-                className={claseFilaEstado(p.estado)}
-                onClick={() => abrirGestion(p)}
-                style={{ cursor: 'pointer' }}
-              >
-                <td className="font-bold">{p.finnegansId}</td>
-                <td>{p.clienteNombre}</td>
-                <td>{p.fecha?.toDate().toLocaleDateString()}</td>
-                <td className="font-bold">${p.total?.toFixed(2)}</td>
-                <td>{renderEstadoPill(p.estado)}</td>
-                <td>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); abrirGestion(p); }}
-                    className="btn btn--secondary btn-sm"
-                  >
-                    Gestionar
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {pedidosFiltrados.length === 0 && (
-              <tr>
-                <td colSpan={6} style={{ textAlign: 'center', padding: '32px', color: 'var(--muted)' }}>
-                  No hay pedidos activos
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+        {/* ─── Columna izquierda: filtros + tabla ─── */}
+        <div className="pedidosweb-left">
 
-      {pedidoSeleccionado && (
-        <div className="modal-backdrop">
-          <div className="modal-card modal modal-card--xl">
+          {/* Tabs de filtro */}
+          <div style={{ display: "flex", gap: "8px", marginBottom: "10px" }}>
+            <button
+              onClick={() => setFiltro("activos")}
+              className={`btn btn-sm ${filtro === "activos" ? "btn--primary" : "btn--ghost"}`}
+            >
+              Activos ({pedidos.filter(p => ESTADOS_ACTIVOS.includes(p.estado)).length})
+            </button>
+            <button
+              onClick={() => setFiltro("todos")}
+              className={`btn btn-sm ${filtro === "todos" ? "btn--primary" : "btn--ghost"}`}
+            >
+              Todos ({pedidos.length})
+            </button>
+          </div>
 
-            {/* HEADER FIJO */}
-            <div className="modal-header-fixed">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 className="h2" style={{ margin: 0 }}>
-                  Gestionar Pedido #{pedidoSeleccionado.finnegansId}
-                </h2>
-                {renderEstadoPill(pedidoSeleccionado.estado)}
-              </div>
-              <div className="meta" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginTop: '15px' }}>
-                <div className="meta-item">
-                  <span className="meta-label">Cliente</span>
-                  <span className="meta-value">{pedidoSeleccionado.clienteNombre}</span>
-                </div>
-                <div className="meta-item">
-                  <span className="meta-label">Entrega</span>
-                  <span className="meta-value">{pedidoSeleccionado.metodoEntrega}</span>
-                </div>
-                <div className="meta-item">
-                  <span className="meta-label">Pago</span>
-                  <span className="meta-value font-bold">
-                    {pedidoSeleccionado.metodoPago || "No especificado"}
-                    {pedidoSeleccionado.metodoPago === "Transferencia" && ` (${pedidoSeleccionado.bancoTransferencia})`}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* ÁREA DE SCROLL */}
-            <div className="modal-scroll-area">
-
-              {/* Resumen de stock */}
-              {!loadingStock && (() => {
-                const insuficientes = pedidoSeleccionado.items.filter(item => {
-                  const sr = getStockRelevante(item.codigo);
-                  return sr !== null && sr < item.cantidad;
-                });
-                if (insuficientes.length > 0) {
-                  return (
-                    <div className="banner banner--error" style={{ marginBottom: '12px' }}>
-                      ⚠️ <strong>{insuficientes.length} producto{insuficientes.length > 1 ? "s" : ""} sin stock suficiente</strong> en depósito {pedidoSeleccionado.depositoAsignado}
-                    </div>
-                  );
-                }
-                return (
-                  <div className="banner banner--ok" style={{ marginBottom: '12px' }}>
-                    ✅ <strong>Stock suficiente</strong> para todos los productos
-                  </div>
-                );
-              })()}
-
-              {/* Nota de error guardada */}
-              {pedidoSeleccionado.notaError && (
-                <div className="banner banner--error" style={{ marginBottom: '12px' }}>
-                  🔴 <strong>Nota del error reportado:</strong> {pedidoSeleccionado.notaError}
-                </div>
-              )}
-
-              {/* Observaciones del cliente */}
-              {pedidoSeleccionado.observaciones && (
-                <div className="banner banner--warn" style={{ marginBottom: '12px' }}>
-                  📝 <strong>Observaciones del Cliente:</strong> {pedidoSeleccionado.observaciones}
-                </div>
-              )}
-
-              <div className="card--preparacion">
-                <h3 className="card-header">Líneas de Pedido y Stock Real</h3>
-                <table className="table table-gestion">
-                  <thead style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 10 }}>
-                    <tr>
-                      <th>Producto</th>
-                      <th>Cant. Pedida</th>
-                      <th>Stock R8</th>
-                      <th>Stock ISA</th>
-                      <th>Validación</th>
+          {/* Tabla — V2: widths definidos, V6: sin botón "Gestionar", V8: headers ordenables */}
+          <div className="card table-wrap" style={{ padding: 0, overflow: "hidden" }}>
+            <table className="table">
+              <colgroup>
+                <col style={{ width: "10%" }} /> {/* ID */}
+                <col style={{ width: "28%" }} /> {/* Cliente */}
+                <col style={{ width: "18%" }} /> {/* Entrega */}
+                <col style={{ width: "13%" }} /> {/* Fecha */}
+                <col style={{ width: "13%" }} /> {/* Total */}
+                <col style={{ width: "18%" }} /> {/* Estado */}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Cliente</th>
+                  <th>Entrega</th>
+                  <th className="th-sort" onClick={() => toggleSort("fecha")}>
+                    Fecha <SortArrow col="fecha" sortCol={sortCol} sortDir={sortDir} />
+                  </th>
+                  <th className="th-sort" onClick={() => toggleSort("total")}>
+                    Total <SortArrow col="total" sortCol={sortCol} sortDir={sortDir} />
+                  </th>
+                  <th className="th-sort" onClick={() => toggleSort("estado")}>
+                    Estado <SortArrow col="estado" sortCol={sortCol} sortDir={sortDir} />
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {pedidosFiltrados.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>
+                      {/* V7: Empty state */}
+                      <div style={{ textAlign: "center", padding: "48px 20px", color: "#94a3b8" }}>
+                        <div style={{ fontSize: "40px", marginBottom: "12px" }}>✅</div>
+                        <strong style={{ color: "#334155", display: "block", marginBottom: "4px", fontSize: "15px" }}>
+                          {filtro === "activos" ? "Sin pedidos activos" : "Sin pedidos registrados"}
+                        </strong>
+                        <span style={{ fontSize: "13px" }}>
+                          {filtro === "activos" ? "Todos los pedidos están gestionados" : "Los pedidos aparecerán acá al llegar"}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  pedidosFiltrados.map(p => (
+                    <tr
+                      key={p.id}
+                      className={claseFilaEstado(p.estado, pedidoSeleccionado?.id === p.id)}
+                      onClick={() => abrirGestion(p)}
+                      style={{ cursor: "pointer" }}
+                      title="Clic para gestionar"
+                    >
+                      <td style={{ fontWeight: 700, fontSize: "13px" }}>{p.finnegansId}</td>
+                      <td>{p.clienteNombre}</td>
+                      <td style={{ fontSize: "13px", color: "#64748b" }}>{p.metodoEntrega || "—"}</td>
+                      <td style={{ fontSize: "13px", color: "#64748b" }}>
+                        {p.fecha?.toDate().toLocaleDateString("es-UY", { day: "2-digit", month: "short" })}
+                      </td>
+                      <td style={{ fontWeight: 700 }}>${p.total?.toFixed(0)}</td>
+                      <td><EstadoPill estado={p.estado} /></td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {pedidoSeleccionado.items.map((item, i) => {
-                      const stock = stockPorProducto[item.codigo];
-                      const stockRelevante = getStockRelevante(item.codigo);
-                      const faltaStock = !loadingStock && stock && stockRelevante < item.cantidad;
-                      const esDepIsa = pedidoSeleccionado.depositoAsignado === "ISABELA";
-                      return (
-                        <tr key={i}>
-                          <td>
-                            <div style={{ fontWeight: '700' }}>
-                              {loadingStock ? item.descripcion : (stock?.nombreFinnegans || item.descripcion)}
-                            </div>
-                            <small className="muted">SKU: {item.codigo}</small>
-                          </td>
-                          <td className="font-bold" style={{ fontSize: '1.2rem' }}>{item.cantidad}</td>
-                          <td style={{ color: !esDepIsa && faltaStock ? 'var(--error)' : 'inherit' }}>
-                            {loadingStock ? "..." : (stock?.r8 ?? "...")}
-                          </td>
-                          <td style={{ color: esDepIsa && faltaStock ? 'var(--error)' : 'inherit' }}>
-                            {loadingStock ? "..." : (stock?.isa ?? "...")}
-                          </td>
-                          <td>
-                            {!loadingStock && stock ? (
-                              faltaStock
-                                ? <span className="pill pill--error">INSUFICIENTE</span>
-                                : <span className="pill pill--ok">DISPONIBLE</span>
-                            ) : "..."}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* FOOTER */}
-            <div style={{ borderTop: '1px solid #eee', paddingTop: '15px' }}>
-              {mostrandoFormError ? (
-                <div style={{ width: '100%' }}>
-                  <label className="label" style={{ marginBottom: '8px', display: 'block' }}>
-                    📝 Describí el problema (el cliente lo verá en su pedido):
-                  </label>
-                  <textarea
-                    className="input textarea"
-                    value={notaError}
-                    onChange={e => setNotaError(e.target.value)}
-                    placeholder="Ej: No hay stock del producto X. Se puede reemplazar por Y o cancelar el pedido."
-                    style={{ marginBottom: '10px' }}
-                    autoFocus
-                  />
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => setMostrandoFormError(false)} className="btn btn--ghost" style={{ flex: 1 }}>
-                      Cancelar
-                    </button>
-                    <button onClick={confirmarError} className="btn btn--danger" style={{ flex: 2 }}>
-                      🔴 Confirmar Error
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="product-actions" style={{ flexDirection: 'row', gap: '12px' }}>
-                  <button onClick={() => setPedidoSeleccionado(null)} className="btn btn--ghost" style={{ flex: 1 }}>
-                    Cerrar
-                  </button>
-
-                  {pedidoSeleccionado.estado === "NUEVO" && (
-                    <button
-                      onClick={() => cambiarEstado(pedidoSeleccionado.id, "EN PREPARACION")}
-                      className="btn btn--primary bg-warn"
-                      style={{ flex: 2 }}
-                    >
-                      🟡 Comenzar Preparación
-                    </button>
-                  )}
-
-                  {pedidoSeleccionado.estado === "EN PREPARACION" && (
-                    <>
-                      <button
-                        onClick={() => setMostrandoFormError(true)}
-                        className="btn btn--danger"
-                        style={{ flex: 1 }}
-                      >
-                        🔴 Reportar Error
-                      </button>
-                      <button
-                        onClick={() => cambiarEstado(pedidoSeleccionado.id, "PREPARADO")}
-                        className="btn btn--primary bg-ok"
-                        style={{ flex: 2 }}
-                      >
-                        🟢 Marcar como Listo
-                      </button>
-                    </>
-                  )}
-
-                  {pedidoSeleccionado.estado === "PREPARADO" && (
-                    <button
-                      onClick={() => cambiarEstado(pedidoSeleccionado.id, "ENTREGADO")}
-                      className="btn btn--primary"
-                      style={{ flex: 2 }}
-                    >
-                      ✅ Marcar como Entregado
-                    </button>
-                  )}
-
-                  {pedidoSeleccionado.estado === "ERROR_STOCK" && (
-                    <>
-                      <button
-                        onClick={() => {
-                          if (window.confirm("¿Cancelar este pedido? Esta acción no se puede deshacer.")) {
-                            cambiarEstado(pedidoSeleccionado.id, "CANCELADO");
-                          }
-                        }}
-                        className="btn btn--danger"
-                        style={{ flex: 1 }}
-                      >
-                        🚫 Cancelar Pedido
-                      </button>
-                      <button
-                        onClick={() => cambiarEstado(pedidoSeleccionado.id, "PREPARADO", { notaError: null })}
-                        className="btn btn--primary bg-ok"
-                        style={{ flex: 2 }}
-                      >
-                        🟢 Confirmar con Cambios
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
+
+        {/* ─── Columna derecha: panel de detalle o placeholder ─── */}
+        <div className="pedidosweb-right">
+          {!pedidoSeleccionado ? (
+
+            // V7: Placeholder
+            <div className="pedidosweb-placeholder">
+              <div style={{ fontSize: "48px", marginBottom: "14px" }}>📋</div>
+              <h3 style={{ margin: "0 0 8px", color: "#334155", fontSize: "16px", fontWeight: 700 }}>
+                Seleccioná un pedido
+              </h3>
+              <p style={{ margin: 0, fontSize: "13px" }}>
+                Hacé clic en cualquier fila de la tabla para gestionarlo
+              </p>
+            </div>
+
+          ) : (
+
+            // V5: Panel de detalle (reemplaza el modal)
+            <div className="pedidosweb-panel">
+
+              {/* Header del panel */}
+              <div className="pedidosweb-panel__header">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <h2 className="h2" style={{ margin: 0 }}>
+                    Pedido #{pedidoSeleccionado.finnegansId}
+                  </h2>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <EstadoPill estado={pedidoSeleccionado.estado} />
+                    <button
+                      onClick={() => setPedidoSeleccionado(null)}
+                      style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer", color: "#94a3b8", lineHeight: 1, padding: "2px 6px" }}
+                      title="Cerrar panel"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+                <div className="meta" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+                  <div className="meta-item">
+                    <span className="meta-label">Cliente</span>
+                    <span className="meta-value">{pedidoSeleccionado.clienteNombre}</span>
+                  </div>
+                  <div className="meta-item">
+                    <span className="meta-label">Entrega</span>
+                    <span className="meta-value">{pedidoSeleccionado.metodoEntrega || "—"}</span>
+                  </div>
+                  <div className="meta-item">
+                    <span className="meta-label">Pago</span>
+                    <span className="meta-value" style={{ fontWeight: 700 }}>
+                      {pedidoSeleccionado.metodoPago || "No especificado"}
+                      {pedidoSeleccionado.metodoPago === "Transferencia" && ` (${pedidoSeleccionado.bancoTransferencia})`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Body scrollable */}
+              <div className="pedidosweb-panel__body">
+
+                {/* Banner de stock */}
+                {!loadingStock && (() => {
+                  const insuficientes = pedidoSeleccionado.items.filter(item => {
+                    const sr = getStockRelevante(item.codigo);
+                    return sr !== null && sr < item.cantidad;
+                  });
+                  return insuficientes.length > 0 ? (
+                    <div className="banner banner--error" style={{ marginBottom: "12px" }}>
+                      ⚠️ <strong>{insuficientes.length} producto{insuficientes.length > 1 ? "s" : ""} sin stock suficiente</strong> en {pedidoSeleccionado.depositoAsignado}
+                    </div>
+                  ) : (
+                    <div className="banner banner--ok" style={{ marginBottom: "12px" }}>
+                      ✅ <strong>Stock suficiente</strong> para todos los productos
+                    </div>
+                  );
+                })()}
+
+                {pedidoSeleccionado.notaError && (
+                  <div className="banner banner--error" style={{ marginBottom: "12px" }}>
+                    🔴 <strong>Nota del error:</strong> {pedidoSeleccionado.notaError}
+                  </div>
+                )}
+
+                {pedidoSeleccionado.observaciones && (
+                  <div className="banner banner--warn" style={{ marginBottom: "12px" }}>
+                    📝 <strong>Obs. del cliente:</strong> {pedidoSeleccionado.observaciones}
+                  </div>
+                )}
+
+                {/* Tabla de stock */}
+                <div className="card--preparacion">
+                  <h3 className="card-header" style={{ marginTop: 0 }}>Líneas del pedido y stock real</h3>
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="table table-gestion">
+                      <thead>
+                        <tr>
+                          <th>Producto</th>
+                          <th style={{ textAlign: "center" }}>Cant.</th>
+                          <th style={{ textAlign: "center" }}>R8</th>
+                          <th style={{ textAlign: "center" }}>ISA</th>
+                          <th style={{ textAlign: "center" }}>Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pedidoSeleccionado.items.map((item, i) => {
+                          const stock = stockPorProducto[item.codigo];
+                          const stockRelevante = getStockRelevante(item.codigo);
+                          const faltaStock = !loadingStock && stock && stockRelevante < item.cantidad;
+                          const esDepIsa = pedidoSeleccionado.depositoAsignado === "ISABELA";
+                          return (
+                            <tr key={i}>
+                              <td>
+                                <div style={{ fontWeight: 700, fontSize: "13px" }}>
+                                  {loadingStock ? item.descripcion : (stock?.nombreFinnegans || item.descripcion)}
+                                </div>
+                                <small style={{ color: "#94a3b8" }}>SKU: {item.codigo}</small>
+                              </td>
+                              <td style={{ textAlign: "center", fontWeight: 800, fontSize: "1.1rem" }}>
+                                {item.cantidad}
+                              </td>
+                              <td style={{
+                                textAlign: "center",
+                                color: !esDepIsa && faltaStock ? "var(--error)" : "inherit",
+                                fontWeight: !esDepIsa && faltaStock ? 800 : 400,
+                              }}>
+                                {loadingStock ? "…" : (stock?.r8 ?? "…")}
+                              </td>
+                              <td style={{
+                                textAlign: "center",
+                                color: esDepIsa && faltaStock ? "var(--error)" : "inherit",
+                                fontWeight: esDepIsa && faltaStock ? 800 : 400,
+                              }}>
+                                {loadingStock ? "…" : (stock?.isa ?? "…")}
+                              </td>
+                              <td style={{ textAlign: "center" }}>
+                                {!loadingStock && stock ? (
+                                  faltaStock
+                                    ? <span className="pill pill--error" style={{ fontSize: "11px", padding: "3px 7px" }}>INSUF.</span>
+                                    : <span className="pill pill--ok" style={{ fontSize: "11px", padding: "3px 7px" }}>OK</span>
+                                ) : <span style={{ color: "#94a3b8" }}>…</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer con botones de acción */}
+              <div className="pedidosweb-panel__footer">
+
+                {/* V4: Formulario de error con validación inline */}
+                {mostrandoFormError ? (
+                  <div>
+                    <label className="label" style={{ marginBottom: "6px", display: "block" }}>
+                      📝 Describí el problema (el cliente lo verá):
+                    </label>
+                    {errorNotaMsg && (
+                      <p style={{ color: "var(--error)", fontSize: "13px", fontWeight: 600, margin: "0 0 6px" }}>
+                        ⚠ {errorNotaMsg}
+                      </p>
+                    )}
+                    <textarea
+                      className="input textarea"
+                      value={notaError}
+                      onChange={e => { setNotaError(e.target.value); setErrorNotaMsg(""); }}
+                      placeholder="Ej: No hay stock del producto X. Se puede reemplazar por Y o cancelar."
+                      style={{ marginBottom: "10px" }}
+                      autoFocus
+                    />
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        onClick={() => { setMostrandoFormError(false); setErrorNotaMsg(""); }}
+                        className="btn btn--ghost"
+                        style={{ flex: 1 }}
+                      >
+                        Cancelar
+                      </button>
+                      <button onClick={confirmarError} className="btn btn--danger" style={{ flex: 2 }}>
+                        🔴 Confirmar Error
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: "10px" }}>
+
+                    {pedidoSeleccionado.estado === "NUEVO" && (
+                      <button
+                        onClick={() => cambiarEstado(pedidoSeleccionado.id, "EN PREPARACION")}
+                        className="btn bg-warn"
+                        style={{ flex: 1, color: "#fff" }}
+                      >
+                        🟡 Comenzar Preparación
+                      </button>
+                    )}
+
+                    {pedidoSeleccionado.estado === "EN PREPARACION" && (
+                      <>
+                        <button
+                          onClick={() => setMostrandoFormError(true)}
+                          className="btn btn--danger"
+                          style={{ flex: 1 }}
+                        >
+                          🔴 Reportar Error
+                        </button>
+                        <button
+                          onClick={() => cambiarEstado(pedidoSeleccionado.id, "PREPARADO")}
+                          className="btn bg-ok"
+                          style={{ flex: 2, color: "#fff" }}
+                        >
+                          🟢 Marcar como Listo
+                        </button>
+                      </>
+                    )}
+
+                    {pedidoSeleccionado.estado === "PREPARADO" && (
+                      <button
+                        onClick={() => cambiarEstado(pedidoSeleccionado.id, "ENTREGADO")}
+                        className="btn btn--primary"
+                        style={{ flex: 1 }}
+                      >
+                        ✅ Marcar como Entregado
+                      </button>
+                    )}
+
+                    {pedidoSeleccionado.estado === "ERROR_STOCK" && (
+                      <>
+                        <button
+                          onClick={() => {
+                            if (window.confirm("¿Cancelar este pedido? Esta acción no se puede deshacer.")) {
+                              cambiarEstado(pedidoSeleccionado.id, "CANCELADO");
+                            }
+                          }}
+                          className="btn btn--danger"
+                          style={{ flex: 1 }}
+                        >
+                          🚫 Cancelar Pedido
+                        </button>
+                        <button
+                          onClick={() => cambiarEstado(pedidoSeleccionado.id, "PREPARADO", { notaError: null })}
+                          className="btn bg-ok"
+                          style={{ flex: 2, color: "#fff" }}
+                        >
+                          🟢 Confirmar con Cambios
+                        </button>
+                      </>
+                    )}
+
+                    {["ENTREGADO", "CANCELADO"].includes(pedidoSeleccionado.estado) && (
+                      <p style={{ color: "#94a3b8", fontSize: "13px", textAlign: "center", width: "100%", margin: 0, padding: "8px 0" }}>
+                        Este pedido ya está cerrado.
+                      </p>
+                    )}
+
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
+        </div>
+
+      </div>
     </div>
   );
 }
