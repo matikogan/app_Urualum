@@ -17,8 +17,8 @@ function EstadoPill({ estado }) {
   const cfg = {
     "NUEVO":          { cls: "pill--brand", label: "NUEVO" },
     "EN PREPARACION": { cls: "pill--warn",  label: "EN PREP." },
-    "PREPARADO":      { cls: "pill--ok",    label: "PREPARADO" },
-    "ERROR_STOCK":    { cls: "pill--error", label: "ERROR STOCK" },
+    "PREPARADO":      { cls: "pill--ok",    label: "LISTO" },
+    "ERROR_STOCK":    { cls: "pill--error", label: "ERROR" },
     "ENTREGADO":      { cls: "pill--info",  label: "ENTREGADO" },
     "CANCELADO":      { cls: "pill--error", label: "CANCELADO" },
   };
@@ -251,18 +251,16 @@ export default function PedidosWeb() {
           <div className="card table-wrap" style={{ padding: 0, overflow: "hidden" }}>
             <table className="table">
               <colgroup>
-                <col style={{ width: "10%" }} /> {/* ID */}
-                <col style={{ width: "28%" }} /> {/* Cliente */}
-                <col style={{ width: "18%" }} /> {/* Entrega */}
-                <col style={{ width: "13%" }} /> {/* Fecha */}
+                <col style={{ width: "22%" }} /> {/* ID */}
+                <col style={{ width: "32%" }} /> {/* Cliente */}
+                <col style={{ width: "16%" }} /> {/* Fecha */}
                 <col style={{ width: "13%" }} /> {/* Total */}
-                <col style={{ width: "18%" }} /> {/* Estado */}
+                <col style={{ width: "17%" }} /> {/* Estado */}
               </colgroup>
               <thead>
                 <tr>
                   <th>ID</th>
                   <th>Cliente</th>
-                  <th>Entrega</th>
                   <th className="th-sort" onClick={() => toggleSort("fecha")}>
                     Fecha <SortArrow col="fecha" sortCol={sortCol} sortDir={sortDir} />
                   </th>
@@ -277,7 +275,7 @@ export default function PedidosWeb() {
               <tbody>
                 {pedidosFiltrados.length === 0 ? (
                   <tr>
-                    <td colSpan={6}>
+                    <td colSpan={5}>
                       {/* V7: Empty state */}
                       <div style={{ textAlign: "center", padding: "48px 20px", color: "#94a3b8" }}>
                         <div style={{ fontSize: "40px", marginBottom: "12px" }}>✅</div>
@@ -299,14 +297,13 @@ export default function PedidosWeb() {
                       style={{ cursor: "pointer" }}
                       title="Clic para gestionar"
                     >
-                      <td style={{ fontWeight: 700, fontSize: "13px" }}>{p.finnegansId}</td>
-                      <td>{p.clienteNombre}</td>
-                      <td style={{ fontSize: "13px", color: "#64748b" }}>{p.metodoEntrega || "—"}</td>
-                      <td style={{ fontSize: "13px", color: "#64748b" }}>
+                      <td style={{ fontWeight: 700, fontSize: "13px", whiteSpace: "nowrap" }}>{p.finnegansId}</td>
+                      <td style={{ fontSize: "13px" }}>{p.clienteNombre}</td>
+                      <td style={{ fontSize: "13px", color: "#64748b", whiteSpace: "nowrap" }}>
                         {p.fecha?.toDate().toLocaleDateString("es-UY", { day: "2-digit", month: "short" })}
                       </td>
-                      <td style={{ fontWeight: 700 }}>${p.total?.toFixed(0)}</td>
-                      <td><EstadoPill estado={p.estado} /></td>
+                      <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>${p.total?.toFixed(0)}</td>
+                      <td style={{ whiteSpace: "nowrap" }}><EstadoPill estado={p.estado} /></td>
                     </tr>
                   ))
                 )}
