@@ -49,7 +49,8 @@ export default function PedidosWeb() {
   const [loadingStock, setLoadingStock]             = useState(false);
 
   const [mostrandoFormError, setMostrandoFormError] = useState(false);
-  const [notaError, setNotaError]       = useState("");
+  const [itemsError, setItemsError]     = useState({}); // { [codigo]: { checked, nota } }
+  const [notaGeneral, setNotaGeneral]   = useState("");
   const [errorNotaMsg, setErrorNotaMsg] = useState(""); // V4: reemplaza alert()
 
   const [toastMsg, setToastMsg]         = useState(null);
@@ -87,7 +88,8 @@ export default function PedidosWeb() {
     }
     setPedidoSeleccionado(pedido);
     setMostrandoFormError(false);
-    setNotaError("");
+    setItemsError({});
+    setNotaGeneral("");
     setErrorNotaMsg("");
     setLoadingStock(true);
     const nuevosStocks = {};
@@ -130,16 +132,45 @@ export default function PedidosWeb() {
     }
   };
 
-  // ── V4: Confirmar error con validación inline ────────────
+  // ── V4: Confirmar error con ítems seleccionados ──────────
   const confirmarError = () => {
-    if (!notaError.trim()) {
-      setErrorNotaMsg("Por favor describí el problema antes de confirmar.");
+    const seleccionados = Object.entries(itemsError).filter(([, v]) => v.checked);
+    if (seleccionados.length === 0) {
+      setErrorNotaMsg("Seleccioná al menos un producto con problema.");
       return;
     }
     setErrorNotaMsg("");
-    cambiarEstado(pedidoSeleccionado.id, "ERROR_STOCK", { notaError });
+    const itemsConError = seleccionados.map(([codigo, v]) => {
+      const item = pedidoSeleccionado.items.find(i => i.codigo === codigo);
+      return {
+        codigo,
+        descripcion: item?.descripcion || codigo,
+        cantidadPedida: item?.cantidad || 0,
+        ...(v.nota.trim() ? { nota: v.nota.trim() } : {}),
+      };
+    });
+    cambiarEstado(pedidoSeleccionado.id, "ERROR_STOCK", {
+      itemsConError,
+      notaError: notaGeneral.trim() || null,
+    });
     setMostrandoFormError(false);
-    setNotaError("");
+    setItemsError({});
+    setNotaGeneral("");
+  };
+
+  const toggleItemError = (codigo) => {
+    setItemsError(prev => ({
+      ...prev,
+      [codigo]: { checked: !prev[codigo]?.checked, nota: prev[codigo]?.nota || "" },
+    }));
+    setErrorNotaMsg("");
+  };
+
+  const setNotaItem = (codigo, nota) => {
+    setItemsError(prev => ({
+      ...prev,
+      [codigo]: { ...prev[codigo], nota },
+    }));
   };
 
   // ── Stock relevante según depósito del pedido ────────────
@@ -388,7 +419,23 @@ export default function PedidosWeb() {
                   );
                 })()}
 
-                {pedidoSeleccionado.notaError && (
+                {pedidoSeleccionado.estado === "ERROR_STOCK" && pedidoSeleccionado.itemsConError?.length > 0 && (
+                  <div className="banner banner--error" style={{ marginBottom: "12px" }}>
+                    <strong>🔴 Productos con problema:</strong>
+                    <ul style={{ margin: "6px 0 0", paddingLeft: "18px" }}>
+                      {pedidoSeleccionado.itemsConError.map((it, i) => (
+                        <li key={i} style={{ fontSize: "13px", marginBottom: "2px" }}>
+                          <strong>{it.descripcion}</strong> (x{it.cantidadPedida})
+                          {it.nota ? ` — ${it.nota}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                    {pedidoSeleccionado.notaError && (
+                      <p style={{ margin: "6px 0 0", fontSize: "13px" }}>{pedidoSeleccionado.notaError}</p>
+                    )}
+                  </div>
+                )}
+                {pedidoSeleccionado.estado === "ERROR_STOCK" && !pedidoSeleccionado.itemsConError?.length && pedidoSeleccionado.notaError && (
                   <div className="banner banner--error" style={{ marginBottom: "12px" }}>
                     🔴 <strong>Nota del error:</strong> {pedidoSeleccionado.notaError}
                   </div>
@@ -464,28 +511,72 @@ export default function PedidosWeb() {
               {/* Footer con botones de acción */}
               <div className="pedidosweb-panel__footer">
 
-                {/* V4: Formulario de error con validación inline */}
+                {/* V4: Formulario de error — selección de ítems con problema */}
                 {mostrandoFormError ? (
                   <div>
-                    <label className="label" style={{ marginBottom: "6px", display: "block" }}>
-                      📝 Describí el problema (el cliente lo verá):
-                    </label>
+                    <p style={{ fontWeight: 700, fontSize: "14px", margin: "0 0 10px", color: "#dc2626" }}>
+                      🔴 Seleccioná los productos con problema:
+                    </p>
                     {errorNotaMsg && (
-                      <p style={{ color: "var(--error)", fontSize: "13px", fontWeight: 600, margin: "0 0 6px" }}>
+                      <p style={{ color: "var(--error)", fontSize: "13px", fontWeight: 600, margin: "0 0 8px" }}>
                         ⚠ {errorNotaMsg}
                       </p>
                     )}
-                    <textarea
-                      className="input textarea"
-                      value={notaError}
-                      onChange={e => { setNotaError(e.target.value); setErrorNotaMsg(""); }}
-                      placeholder="Ej: No hay stock del producto X. Se puede reemplazar por Y o cancelar."
-                      style={{ marginBottom: "10px" }}
-                      autoFocus
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
+                      {pedidoSeleccionado.items.map((item) => {
+                        const checked = !!itemsError[item.codigo]?.checked;
+                        return (
+                          <div key={item.codigo} style={{
+                            border: checked ? "1.5px solid #dc2626" : "1.5px solid #e2e8f0",
+                            borderRadius: "8px",
+                            padding: "10px 12px",
+                            background: checked ? "#fff5f5" : "#f8fafc",
+                          }}>
+                            <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer" }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleItemError(item.codigo)}
+                                style={{ marginTop: "3px", accentColor: "#dc2626", width: "16px", height: "16px", flexShrink: 0 }}
+                              />
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 600, fontSize: "13px", color: "#1e293b" }}>
+                                  {item.descripcion}
+                                </div>
+                                <div style={{ fontSize: "12px", color: "#64748b" }}>
+                                  SKU {item.codigo} · Cant. pedida: <strong>{item.cantidad}</strong>
+                                </div>
+                              </div>
+                            </label>
+                            {checked && (
+                              <input
+                                className="input"
+                                type="text"
+                                value={itemsError[item.codigo]?.nota || ""}
+                                onChange={e => setNotaItem(item.codigo, e.target.value)}
+                                placeholder="Detalle opcional (ej: sin stock, solo hay 2 uds.)"
+                                style={{ marginTop: "8px", fontSize: "13px", padding: "6px 10px" }}
+                                autoFocus
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <input
+                      className="input"
+                      type="text"
+                      value={notaGeneral}
+                      onChange={e => setNotaGeneral(e.target.value)}
+                      placeholder="Nota general para el cliente (opcional)"
+                      style={{ marginBottom: "10px", fontSize: "13px" }}
                     />
+
                     <div style={{ display: "flex", gap: "8px" }}>
                       <button
-                        onClick={() => { setMostrandoFormError(false); setErrorNotaMsg(""); }}
+                        onClick={() => { setMostrandoFormError(false); setItemsError({}); setNotaGeneral(""); setErrorNotaMsg(""); }}
                         className="btn btn--ghost"
                         style={{ flex: 1 }}
                       >

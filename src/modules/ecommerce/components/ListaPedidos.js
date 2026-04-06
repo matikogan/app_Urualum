@@ -82,10 +82,31 @@ function PedidoDetalle({ pedido: p, onVolver, copiadoId, onCopiar, onRepetir }) 
       {p.estado === "ERROR_STOCK" && (
         <div className="banner banner--error" style={{ marginBottom: "12px" }}>
           <strong>⚠️ Hay una diferencia en tu pedido</strong>
-          {p.notaError
-            ? <p style={{ margin: "6px 0 0", fontSize: "14px" }}>{p.notaError}</p>
-            : <p style={{ margin: "6px 0 0", fontSize: "14px" }}>Un asesor se contactará contigo a la brevedad.</p>
-          }
+          {p.itemsConError?.length > 0 ? (
+            <>
+              <p style={{ margin: "8px 0 4px", fontSize: "14px", fontWeight: 600 }}>
+                Productos con problema:
+              </p>
+              <ul style={{ margin: "0 0 6px", paddingLeft: "18px" }}>
+                {p.itemsConError.map((it, i) => (
+                  <li key={i} style={{ fontSize: "14px", marginBottom: "4px" }}>
+                    <strong>{it.descripcion}</strong> (x{it.cantidadPedida})
+                    {it.nota ? <span style={{ color: "#7f1d1d" }}> — {it.nota}</span> : ""}
+                  </li>
+                ))}
+              </ul>
+              {p.notaError && (
+                <p style={{ margin: "4px 0 0", fontSize: "13px" }}>{p.notaError}</p>
+              )}
+              <p style={{ margin: "8px 0 0", fontSize: "13px", color: "#7f1d1d" }}>
+                Un asesor se contactará contigo a la brevedad.
+              </p>
+            </>
+          ) : (
+            <p style={{ margin: "6px 0 0", fontSize: "14px" }}>
+              {p.notaError || "Un asesor se contactará contigo a la brevedad."}
+            </p>
+          )}
         </div>
       )}
 

@@ -263,11 +263,15 @@ service cloud.firestore {
     match /pedidos_web/{docId} {
       // Cualquier usuario logueado puede crear su pedido
       allow create: if isAuthed();
-      // Ventas, Encargados, o el propio cliente pueden leer y actualizar
+      // Ventas, Encargados, o el propio cliente pueden leer y actualizar.
+      // Un cliente puede leer su pedido si:
+      //   a) clienteId coincide con su UID (pedido creado por el mismo cliente), O
+      //   b) clienteFinnegansId coincide con su código en el perfil (pedido creado por un vendedor en su nombre)
       allow read, update: if isAuthed() && (
-        isVentas() || 
-        isEncargado() || 
-        resource.data.clienteId == request.auth.uid
+        isVentas() ||
+        isEncargado() ||
+        resource.data.clienteId == request.auth.uid ||
+        resource.data.clienteFinnegansId == userDoc().data.finnegansClienteCodigo
       );
       allow delete: if false;
     }
