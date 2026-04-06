@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   collection, query, orderBy, where,
   onSnapshot, doc, updateDoc, serverTimestamp,
@@ -58,6 +58,23 @@ export default function PedidosWeb() {
   // V8: estado de ordenamiento
   const [sortCol, setSortCol] = useState("fecha");
   const [sortDir, setSortDir] = useState("desc");
+
+  // Integración P1: estado del pedido en el depósito
+  const [pedidoInterno, setPedidoInterno] = useState(null);
+  const unsubInternoRef = useRef(null);
+
+  // ── Suscripción en tiempo real al pedido interno (Proyecto 1) ───────────
+  useEffect(() => {
+    if (unsubInternoRef.current) { unsubInternoRef.current(); unsubInternoRef.current = null; }
+    setPedidoInterno(null);
+    const wid = pedidoSeleccionado?.webPedidoId;
+    if (!wid) return;
+    const unsub = onSnapshot(doc(db, "pedidos", wid), (snap) => {
+      setPedidoInterno(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    });
+    unsubInternoRef.current = unsub;
+    return () => { unsub(); unsubInternoRef.current = null; };
+  }, [pedidoSeleccionado?.webPedidoId]);
 
   // ── Datos en tiempo real ─────────────────────────────────
   useEffect(() => {
@@ -222,6 +239,16 @@ export default function PedidosWeb() {
       estado === "ERROR_STOCK"    ? "row--error"       :
       ["ENTREGADO", "CANCELADO"].includes(estado) ? "row--inactivo" : "";
     return isSelected ? `${base} row--seleccionado` : base;
+  };
+
+  // ── Labels de estado interno para mostrar al vendedor ───────────────────
+  const ESTADO_DEPOSITO = {
+    PENDIENTE_ASIGNAR: { icon: "⏳", label: "Esperando asignación" },
+    ASIGNADO:          { icon: "👤", label: "Asignado" },
+    EN_PREPARACION:    { icon: "🔨", label: "En preparación" },
+    PREPARADO:         { icon: "✅", label: "Preparado en depósito" },
+    CONTROLADO:        { icon: "🔍", label: "Controlado" },
+    DESPACHADO:        { icon: "📤", label: "Despachado" },
   };
 
   if (loading) return <div className="container screen-center">⏳ Cargando buzón...</div>;
@@ -415,6 +442,37 @@ export default function PedidosWeb() {
                   ) : (
                     <div className="banner banner--ok" style={{ marginBottom: "12px" }}>
                       ✅ <strong>Stock suficiente</strong> para todos los productos
+                    </div>
+                  );
+                })()}
+
+                {/* ── Estado en Depósito (Integración P1) ── */}
+                {pedidoSeleccionado.webPedidoId && (() => {
+                  const info = ESTADO_DEPOSITO[pedidoInterno?.estado];
+                  return (
+                    <div className="banner banner--info" style={{ marginBottom: "12px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <strong style={{ fontSize: "13px" }}>📦 Estado en Depósito</strong>
+                        <span style={{ fontSize: "11px", color: "#64748b" }}>
+                          ID: {pedidoSeleccionado.webPedidoId}
+                        </span>
+                      </div>
+                      {pedidoInterno ? (
+                        <div style={{ marginTop: "6px", fontSize: "13px" }}>
+                          <span style={{ fontWeight: 700 }}>
+                            {info?.icon} {info?.label || pedidoInterno.estado}
+                          </span>
+                          {pedidoInterno.operarioNombre && (
+                            <span style={{ color: "#334155", marginLeft: "8px" }}>
+                              · {pedidoInterno.operarioNombre}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b" }}>
+                          ⏳ Cargando estado del depósito...
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

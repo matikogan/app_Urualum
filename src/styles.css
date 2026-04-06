@@ -376,8 +376,10 @@ html, body { margin:0; padding:0; font-family: var(--font); color: var(--ink); b
   padding:12px 14px;
   margin-top:12px;
 }
-.banner--warn { background:#fff7e0; border-color:#ffecb3; }
-.banner--ok   { background:#e7f5ec; border-color:#cde9d6; }
+.banner--warn  { background:#fff7e0; border-color:#ffecb3; }
+.banner--ok    { background:#e7f5ec; border-color:#cde9d6; }
+.banner--error { background:#fff5f5; border-color:#fecaca; }
+.banner--info  { background:#eff6ff; border-color:#bfdbfe; }
 .banner-list { margin:6px 0 0 18px; }
 
 /* Tabla limpia y responsive */
