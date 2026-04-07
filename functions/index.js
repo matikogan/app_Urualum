@@ -202,6 +202,96 @@ exports.notificarErrorPreparacion = onDocumentCreated(
 
 
 // ======================================================================
+// NOTIFICACIONES: PROBLEMA EN PREPARACIÓN
+// ======================================================================
+
+exports.notificarProblemaPreparacion = onDocumentUpdated(
+  "pedidos/{id}",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const before = snap.before.data();
+    const after = snap.after.data();
+
+    const problemaBefore = before.problema;
+    const problemaAfter = after.problema;
+    if (!problemaAfter) return;
+    if (problemaAfter.estado !== "PENDIENTE") return;
+    if (problemaBefore?.estado === "PENDIENTE") return; // ya fue notificado
+
+    const numero = after.numero || event.params.id;
+    const deposito = after.deposito;
+    const tipo = problemaAfter.tipo === "FALTA_STOCK" ? "falta de stock" : "otro problema";
+    const producto = problemaAfter.productoNombre || "un producto";
+
+    logger.info("Problema en preparación:", numero, tipo, producto);
+
+    const usersSnap = await db
+      .collection("users")
+      .where("rol", "==", "encargado")
+      .where("deposito", "==", deposito)
+      .get();
+
+    const tokens = [];
+    usersSnap.forEach((doc) => {
+      const t = doc.data().fcmToken;
+      if (t) tokens.push(t);
+    });
+
+    await sendPushNotification(tokens, {
+      title: "⚠️ Problema en preparación",
+      body: `Pedido ${numero}: ${tipo} en "${producto}"`,
+      click_action: `https://app.urualum.uy/pedidos/${event.params.id}`,
+    });
+  }
+);
+
+exports.notificarProblemaElevado = onDocumentUpdated(
+  "pedidos/{id}",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const before = snap.before.data();
+    const after = snap.after.data();
+
+    const problemaBefore = before.problema;
+    const problemaAfter = after.problema;
+    if (!problemaAfter) return;
+    if (problemaAfter.estado !== "ELEVADO") return;
+    if (problemaBefore?.estado === "ELEVADO") return;
+
+    const numero = after.numero || event.params.id;
+    const tipo = problemaAfter.tipo === "FALTA_STOCK" ? "falta de stock" : "otro problema";
+    const producto = problemaAfter.productoNombre || "un producto";
+    const nota = problemaAfter.notaEncargado ? ` — ${problemaAfter.notaEncargado}` : "";
+
+    logger.info("Problema elevado a ventas:", numero);
+
+    // Notificar a todos los usuarios de ventas (rol o role)
+    const [snapRol, snapRole] = await Promise.all([
+      db.collection("users").where("rol", "==", "ventas").get(),
+      db.collection("users").where("role", "==", "ventas").get(),
+    ]);
+
+    const seen = new Set();
+    const tokens = [];
+    [...snapRol.docs, ...snapRole.docs].forEach((doc) => {
+      if (seen.has(doc.id)) return;
+      seen.add(doc.id);
+      const t = doc.data().fcmToken;
+      if (t) tokens.push(t);
+    });
+
+    await sendPushNotification(tokens, {
+      title: `🚨 Problema escalado — Pedido ${numero}`,
+      body: `${tipo} en "${producto}"${nota}. Requiere atención.`,
+      click_action: `https://app.urualum.uy/pedidos/${event.params.id}`,
+    });
+  }
+);
+
+
+// ======================================================================
 // FINNEGANS MODULE
 // ======================================================================
 
