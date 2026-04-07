@@ -9,7 +9,7 @@ import QrScanner from "../../../components/QrScanner";
 import { getCatalogoByCodUru } from "../services/catalogo";
 import { getStockTiras, confirmarPedidoConStock } from "../services/stockTiras";
 import { db } from "../../../firebase";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 
 import PackConfirmModal from "./PackConfirmModal";
 import PackErrorModal from "./PackErrorModal";
@@ -46,7 +46,7 @@ export default function PedidoDetalleOperario() {
   const pedidoId = useMemo(() => decodeURIComponent(rawId || ""), [rawId]);
   const { toast, haptics } = useApp();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
 
   const [pedido, setPedido]         = useState(null);
   const [lite, setLite]             = useState(true);
@@ -63,6 +63,11 @@ export default function PedidoDetalleOperario() {
   const [scanForKey, setScanForKey]   = useState(null);
   const [packConfirm, setPackConfirm] = useState(null);
   const [packError, setPackError]     = useState(null);
+
+  // problema
+  const [showProblema, setShowProblema] = useState(false);
+  const [reportando, setReportando]     = useState(false);
+  const [problemaForm, setProblemaForm] = useState({ productoIdx: 0, tipo: "FALTA_STOCK", desc: "" });
 
   // ===== Carga inicial =====
   useEffect(() => {
@@ -261,6 +266,52 @@ export default function PedidoDetalleOperario() {
       toast?.error?.(e.message || "No se pudo confirmar la preparación");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function reportarProblema() {
+    if (reportando) return;
+    try {
+      setReportando(true);
+      const it = (pedido?.productos || [])[problemaForm.productoIdx];
+      const raw = it ? (it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "") : "";
+      const uru = toURUCode(raw);
+      const cat = catalogoMap[uru] || {};
+      const nombre = it ? getNombreProducto(it, cat) : "Producto desconocido";
+      const reportadoNombre = profile?.nombre || user?.displayName || user?.email || "Operario";
+
+      await updateDoc(doc(db, "pedidos", pedido.id || pedidoId), {
+        problema: {
+          productoIdx: problemaForm.productoIdx,
+          productoNombre: nombre,
+          tipo: problemaForm.tipo,
+          descripcion: problemaForm.desc.trim(),
+          reportadoPor: user?.uid || null,
+          reportadoNombre,
+          reportadoAt: serverTimestamp(),
+          estado: "PENDIENTE",
+        },
+      });
+      setPedido(prev => prev ? {
+        ...prev,
+        problema: {
+          productoIdx: problemaForm.productoIdx,
+          productoNombre: nombre,
+          tipo: problemaForm.tipo,
+          descripcion: problemaForm.desc.trim(),
+          reportadoPor: user?.uid || null,
+          reportadoNombre,
+          reportadoAt: new Date(),
+          estado: "PENDIENTE",
+        },
+      } : prev);
+      toast?.success?.("Problema reportado al encargado");
+      setShowProblema(false);
+    } catch (e) {
+      console.error(e);
+      toast?.error?.("No se pudo reportar. Intentá de nuevo.");
+    } finally {
+      setReportando(false);
     }
   }
 
@@ -464,6 +515,35 @@ export default function PedidoDetalleOperario() {
               Marcar todos como cargados
             </button>
           )}
+
+          {/* ── Problema activo ── */}
+          {pedido?.problema?.estado === "PENDIENTE" && (
+            <div style={{ background: "#fff7ed", border: "1.5px solid #fb923c", borderRadius: "12px", padding: "12px 14px", display: "flex", alignItems: "center", gap: "10px" }}>
+              <span style={{ fontSize: "1.1rem", flexShrink: 0 }}>⚠️</span>
+              <p style={{ margin: 0, fontSize: "0.84rem", color: "#9a3412", fontWeight: 600 }}>
+                Problema reportado — esperando al encargado
+              </p>
+            </div>
+          )}
+
+          {/* ── Reportar problema ── */}
+          {!pedido?.problema || pedido?.problema?.estado === "REVISADO" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setProblemaForm({ productoIdx: 0, tipo: "FALTA_STOCK", desc: "" });
+                setShowProblema(true);
+              }}
+              style={{
+                width: "100%", padding: "10px",
+                background: "transparent", border: "1.5px dashed #fca5a5",
+                borderRadius: "12px", color: "#ef4444",
+                fontSize: "0.82rem", fontWeight: 600, cursor: "pointer",
+              }}
+            >
+              ⚠️ Reportar un problema con el pedido
+            </button>
+          ) : null}
         </div>
       ) : (
         /* ── Modo escáner (sin cambios) ── */
@@ -585,6 +665,123 @@ export default function PedidoDetalleOperario() {
               ? "✓ Marcar pedido como preparado"
               : `Faltan ${totalProductos - checkedCount} producto${totalProductos - checkedCount !== 1 ? "s" : ""}`}
           </button>
+        </div>
+      )}
+
+      {/* ── Overlay: Reportar problema ── */}
+      {showProblema && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "flex-end" }}>
+          <div style={{ background: "#fff", borderRadius: "20px 20px 0 0", padding: "24px 16px 40px", width: "100%", maxHeight: "92vh", overflow: "auto" }}>
+            {/* Título */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
+              <h2 style={{ margin: 0, fontWeight: 700, fontSize: "1.1rem", color: "#0f172a" }}>Reportar problema</h2>
+              <button
+                type="button"
+                onClick={() => setShowProblema(false)}
+                style={{ background: "none", border: "none", fontSize: "1.2rem", color: "#94a3b8", cursor: "pointer", padding: "4px 8px" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Seleccionar producto */}
+            <p style={{ margin: "0 0 8px", fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              ¿En qué producto?
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginBottom: "20px" }}>
+              {(pedido?.productos || []).map((it, i) => {
+                const raw = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
+                const uru = toURUCode(raw);
+                const cat = catalogoMap[uru] || {};
+                const nombre = getNombreProducto(it, cat);
+                const qty = reqQty(it);
+                const selected = problemaForm.productoIdx === i;
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setProblemaForm(p => ({ ...p, productoIdx: i }))}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "11px 14px", textAlign: "left", width: "100%",
+                      background: selected ? "#eff6ff" : "#f8fafc",
+                      border: `1.5px solid ${selected ? "#3b82f6" : "#e2e8f0"}`,
+                      borderRadius: "12px", cursor: "pointer",
+                      fontWeight: selected ? 600 : 400, fontSize: "0.88rem",
+                      color: selected ? "#1d4ed8" : "#1e293b",
+                      transition: "all 0.1s ease",
+                    }}
+                  >
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{nombre}</span>
+                    <span style={{ flexShrink: 0, marginLeft: "8px", background: selected ? "#dbeafe" : "#f1f5f9", color: selected ? "#1d4ed8" : "#64748b", fontWeight: 700, fontSize: "0.78rem", padding: "2px 7px", borderRadius: "6px" }}>
+                      ×{qty}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Tipo de problema */}
+            <p style={{ margin: "0 0 8px", fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              ¿Cuál es el problema?
+            </p>
+            <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+              {[["FALTA_STOCK", "📦 Falta de stock"], ["OTRO", "⚠️ Otro motivo"]].map(([val, label]) => {
+                const sel = problemaForm.tipo === val;
+                return (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setProblemaForm(p => ({ ...p, tipo: val }))}
+                    style={{
+                      flex: 1, padding: "12px 8px",
+                      background: sel ? "#fef2f2" : "#f8fafc",
+                      border: `1.5px solid ${sel ? "#f87171" : "#e2e8f0"}`,
+                      borderRadius: "12px", cursor: "pointer",
+                      fontWeight: 600, fontSize: "0.85rem",
+                      color: sel ? "#dc2626" : "#475569",
+                      transition: "all 0.1s ease",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Descripción */}
+            <p style={{ margin: "0 0 8px", fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Descripción (opcional)
+            </p>
+            <textarea
+              value={problemaForm.desc}
+              onChange={e => setProblemaForm(p => ({ ...p, desc: e.target.value }))}
+              placeholder={problemaForm.tipo === "FALTA_STOCK"
+                ? "Ej: Solo hay 3 y necesito 5…"
+                : "Describí el problema brevemente…"}
+              rows={3}
+              style={{
+                width: "100%", padding: "12px",
+                border: "1.5px solid #e2e8f0", borderRadius: "12px",
+                fontSize: "0.9rem", resize: "none",
+                boxSizing: "border-box", marginBottom: "16px",
+              }}
+            />
+
+            {/* CTA */}
+            <button
+              type="button"
+              onClick={reportarProblema}
+              disabled={reportando}
+              style={{
+                width: "100%", padding: "15px", borderRadius: "14px", border: "none",
+                background: "#dc2626", color: "#fff",
+                fontWeight: 700, fontSize: "1rem", cursor: "pointer",
+              }}
+            >
+              {reportando ? "Reportando…" : "Reportar al encargado"}
+            </button>
+          </div>
         </div>
       )}
 
