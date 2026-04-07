@@ -1714,6 +1714,259 @@ const filteredOperarios = useMemo(() => {
   }
   // ── Fin vista PREPARADO ───────────────────────────────────────────────────
 
+  // ── Vista CONTROLADO — ENCARGADO (solo info) ─────────────────────────────
+  if (pedido.estado === ESTADOS.CONTROLADO && isEncargado) {
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+    const operarioNombre = pedido.operarioNombre || "—";
+    const avatarInitial = operarioNombre[0]?.toUpperCase() || "?";
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "24px" }}>
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+          <VolverListaPedidos to="/pedidos" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Pedido #{pedido.numero || id}</p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>{pedido.cliente || "—"}</h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#ede9fe", color: "#5b21b6", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>
+              CONTROLADO
+            </span>
+          </div>
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
+            {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🚚 {pedido.metodoEntrega}</span>}
+            {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🏭 {pedido.deposito}</span>}
+          </div>
+        </div>
+        <div style={{ padding: "16px" }}>
+          {/* Estado */}
+          <div style={{ background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: "14px", padding: "14px 16px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ fontSize: "1.4rem" }}>✅</span>
+            <div>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "#166534" }}>Pedido controlado y listo para despacho</p>
+              <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "#16a34a" }}>El equipo de ventas realizará el despacho</p>
+            </div>
+          </div>
+          {/* Preparado por */}
+          <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Preparado por</p>
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div style={{ width: "38px", height: "38px", borderRadius: "50%", background: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.95rem", fontWeight: 700, color: "#fff", flexShrink: 0 }}>{avatarInitial}</div>
+              <p style={{ margin: 0, fontWeight: 600, fontSize: "0.92rem", color: "#0f172a" }}>{operarioNombre}</p>
+              {pedido.bultos > 0 && <span style={{ marginLeft: "auto", fontSize: "0.78rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📦 {pedido.bultos} bultos</span>}
+              {pedido.paquetes > 0 && <span style={{ fontSize: "0.78rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📫 {pedido.paquetes} paquetes</span>}
+            </div>
+          </div>
+          {/* Productos */}
+          <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Contenido · {productos.length} producto{productos.length !== 1 ? "s" : ""}</p>
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "12px 16px" }}>
+            {productos.map((it, i) => {
+              const raw = it.cod || it.descripcion || it.desc || "";
+              const uru = toURUCode(raw);
+              const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+              const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 0", borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                  <p style={{ flex: 1, margin: 0, fontSize: "0.86rem", color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                  <span style={{ flexShrink: 0, background: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: "0.82rem", padding: "2px 8px", borderRadius: "8px" }}>×{qty}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // ── Fin vista CONTROLADO encargado ────────────────────────────────────────
+
+  // ── Vista CONTROLADO — VENTAS (detalle completo + despacho) ──────────────
+  if (pedido.estado === ESTADOS.CONTROLADO && isVentas) {
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+    const getElapsedStr = (ts) => {
+      if (!ts) return null;
+      const at = ts?.toDate ? ts.toDate() : new Date(ts);
+      if (isNaN(at)) return null;
+      const mins = Math.floor((Date.now() - at.getTime()) / 60000);
+      if (mins < 1) return "hace menos de 1 min";
+      if (mins < 60) return `hace ${mins} min`;
+      const hrs = Math.floor(mins / 60);
+      const rem = mins % 60;
+      return rem > 0 ? `hace ${hrs}h ${rem}min` : `hace ${hrs}h`;
+    };
+    const { operario: prodsOperario, encargado: prodsEncargado } = splitPorCategoria(productos, catalogoMap);
+    const operarioNombre = pedido.operarioNombre || "—";
+    const avatarInitial = operarioNombre[0]?.toUpperCase() || "?";
+    const preparadoElapsed = getElapsedStr(pedido.timestamps?.PREPARADO);
+
+    // Timeline de estados
+    const timelineEstados = [
+      { key: "PENDIENTE_ASIGNAR", label: "Ingresó" },
+      { key: "ASIGNADO", label: "Asignado" },
+      { key: "EN_PREPARACION", label: "En preparación" },
+      { key: "PREPARADO", label: "Preparado" },
+      { key: "CONTROLADO", label: "Controlado" },
+    ];
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "88px" }}>
+
+        {/* ── Header ── */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+          <VolverListaPedidos to="/ventas/para-despachar" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Pedido #{pedido.numero || id}</p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>{pedido.cliente || "—"}</h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#ede9fe", color: "#5b21b6", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>LISTO P/ DESPACHO</span>
+          </div>
+          {/* Metadata chips */}
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
+            {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🚚 {pedido.metodoEntrega}</span>}
+            {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🏭 {pedido.deposito}</span>}
+          </div>
+        </div>
+
+        <div style={{ padding: "16px" }}>
+
+          {/* ── Timeline ── */}
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              {timelineEstados.map(({ key, label }, i) => {
+                const ts = pedido.timestamps?.[key];
+                const at = ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
+                const done = !!at && !isNaN(at);
+                const isCurrent = key === "CONTROLADO";
+                return (
+                  <div key={key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
+                    {i > 0 && (
+                      <div style={{ position: "absolute", top: "9px", right: "50%", left: "-50%", height: "2px", background: done ? "#a855f7" : "#e2e8f0", zIndex: 0 }} />
+                    )}
+                    <div style={{ width: "18px", height: "18px", borderRadius: "50%", background: isCurrent ? "#7c3aed" : done ? "#a855f7" : "#e2e8f0", border: `2px solid ${isCurrent ? "#7c3aed" : done ? "#a855f7" : "#e2e8f0"}`, zIndex: 1, position: "relative" }} />
+                    <p style={{ margin: "4px 0 0", fontSize: "0.62rem", fontWeight: isCurrent ? 700 : 500, color: isCurrent ? "#7c3aed" : done ? "#6d28d9" : "#94a3b8", textAlign: "center", lineHeight: 1.2 }}>{label}</p>
+                    {done && <p style={{ margin: "1px 0 0", fontSize: "0.58rem", color: "#94a3b8", textAlign: "center" }}>{at.toLocaleDateString("es-AR", { day: "2-digit", month: "short" })}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Info de preparación ── */}
+          <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Preparación</p>
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+              <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: 700, color: "#fff", flexShrink: 0 }}>{avatarInitial}</div>
+              <div>
+                <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "#0f172a" }}>{operarioNombre}</p>
+                {preparadoElapsed && <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "#64748b" }}>Preparado {preparadoElapsed}</p>}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <div style={{ flex: 1, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px", textAlign: "center" }}>
+                <p style={{ margin: 0, fontSize: "1.4rem", fontWeight: 800, color: "#0f172a" }}>{pedido.bultos ?? "—"}</p>
+                <p style={{ margin: "2px 0 0", fontSize: "0.7rem", color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" }}>Bultos</p>
+              </div>
+              <div style={{ flex: 1, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px", textAlign: "center" }}>
+                <p style={{ margin: 0, fontSize: "1.4rem", fontWeight: 800, color: "#0f172a" }}>{pedido.paquetes ?? "—"}</p>
+                <p style={{ margin: "2px 0 0", fontSize: "0.7rem", color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" }}>Paquetes</p>
+              </div>
+              <div style={{ flex: 1, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px", textAlign: "center" }}>
+                <p style={{ margin: 0, fontSize: "1.4rem", fontWeight: 800, color: "#0f172a" }}>{productos.length}</p>
+                <p style={{ margin: "2px 0 0", fontSize: "0.7rem", color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" }}>Ítems</p>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Productos — Perfiles/Kits ── */}
+          {prodsOperario.length > 0 && (
+            <>
+              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Perfiles y kits · {prodsOperario.length} ítem{prodsOperario.length !== 1 ? "s" : ""}</p>
+              <div style={{ background: "#fff", border: "1.5px solid #bfdbfe", borderRadius: "14px", padding: "4px 16px", marginBottom: "12px" }}>
+                {prodsOperario.map(({ it, uru }, i) => {
+                  const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                  const color = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
+                  const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: i < prodsOperario.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontSize: "0.86rem", fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                        {color && <p style={{ margin: "1px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
+                      </div>
+                      <span style={{ flexShrink: 0, background: "#dbeafe", color: "#1d4ed8", fontWeight: 700, fontSize: "0.82rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* ── Productos — Accesorios/Otros ── */}
+          {prodsEncargado.length > 0 && (
+            <>
+              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Accesorios y otros · {prodsEncargado.length} ítem{prodsEncargado.length !== 1 ? "s" : ""}</p>
+              <div style={{ background: "#fff", border: "1.5px solid #fed7aa", borderRadius: "14px", padding: "4px 16px", marginBottom: "16px" }}>
+                {prodsEncargado.map(({ it, uru }, i) => {
+                  const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                  const color = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
+                  const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: i < prodsEncargado.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontSize: "0.86rem", fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                        {color && <p style={{ margin: "1px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
+                      </div>
+                      <span style={{ flexShrink: 0, background: "#ffedd5", color: "#c2410c", fontWeight: 700, fontSize: "0.82rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* Si el catálogo no cargó: lista sin categorizar */}
+          {Object.keys(catalogoMap).length === 0 && productos.length > 0 && (
+            <>
+              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Productos · {productos.length} ítems</p>
+              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "4px 16px", marginBottom: "16px" }}>
+                {productos.map((it, i) => {
+                  const raw = it.cod || it.descripcion || it.desc || "";
+                  const uru = toURUCode(raw);
+                  const nombre = it.descripcion || it.desc || it.nombre || uru || "—";
+                  const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                      <p style={{ flex: 1, margin: 0, fontSize: "0.86rem", color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                      <span style={{ flexShrink: 0, background: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: "0.82rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ── CTA fijo: Despachar ── */}
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 16px 20px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)" }}>
+          <ConfirmarDespacho pedidoId={id} />
+        </div>
+      </div>
+    );
+  }
+  // ── Fin vista CONTROLADO ventas ───────────────────────────────────────────
+
   return (
     <div className="p-3 space-y-4">
       {/* Header + volver */}
