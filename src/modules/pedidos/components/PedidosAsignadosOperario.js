@@ -10,6 +10,20 @@ import useNotificationSound from "hooks/useNotificationSound";
 // Estados visibles para operario
 const ESTADOS_VISIBLES = new Set(["ASIGNADO", "EN_PREPARACION"]);
 
+// Helper: tiempo transcurrido en el estado actual
+function formatTimeAgo(ts) {
+  if (!ts) return null;
+  const date = ts?.seconds ? new Date(ts.seconds * 1000) : (ts instanceof Date ? ts : new Date(ts));
+  if (isNaN(date.getTime())) return null;
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "ahora";
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h`;
+  return `${Math.floor(diffH / 24)}d`;
+}
+
 // Helpers UI (solo presentación)
 function MetodoChip({ metodo }) {
   if (!metodo) return null;
@@ -85,7 +99,9 @@ export default function PedidosAsignadosOperario() {
       },
       onError: (e) => {
         console.error(e);
-        toast.error("Error cargando tus pedidos");
+        toast.error(e?.code === "permission-denied"
+          ? "Sin permisos para ver estos pedidos."
+          : "No se pudieron cargar tus pedidos. Verifica tu conexión.");
         setLoading(false);
       }
     });
@@ -133,6 +149,11 @@ export default function PedidosAsignadosOperario() {
                       <div className="order-head">
                         <div className="order-number">#{p.numero}</div>
                         <MetodoChip metodo={p.metodoEntrega} />
+                        {formatTimeAgo(p.timestamps?.[p.estado]) && (
+                          <span className="pill pill--muted" title={`En estado ${p.estado} desde hace este tiempo`}>
+                            ⏱ {formatTimeAgo(p.timestamps?.[p.estado])}
+                          </span>
+                        )}
                         <span className="muted" style={{ marginLeft: "auto" }}>
                           {fmtFecha(p.finFecha)}
                         </span>

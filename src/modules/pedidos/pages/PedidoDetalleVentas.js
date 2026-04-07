@@ -11,7 +11,6 @@ import { moverPedidoADespachados } from "../services/moverPedidoDespachado";
 export default function PedidoDetalleVentas() {
   const { id: encodedId } = useParams();
   const id = decodeURIComponent(encodedId || "");
-  console.log("🔍 PedidoDetalleVentas → ID desde URL:", id);    
   const { toast, haptics } = useApp();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -25,14 +24,7 @@ export default function PedidoDetalleVentas() {
     (async () => {
       try {
         const ref = doc(db, "pedidos", id);
-        console.log("📄 Buscando pedido en FS con ID:", id);
-
         const snap = await getDoc(ref);
-
-        console.log("📄 Existe documento en Firestore?", snap.exists());
-        if (snap.exists()) {
-        console.log("📄 Datos del pedido:", snap.data());
-        }
 
         if (!snap.exists()) {
           toast.error("Pedido no encontrado");
@@ -43,7 +35,7 @@ export default function PedidoDetalleVentas() {
           setPedido({ id, ...snap.data() });
         }
       } catch (e) {
-        toast.error("Error cargando pedido");
+        toast.error("No se pudo cargar el pedido. Verifica tu conexión.");
       } finally {
         if (!cancel) setLoading(false);
       }
@@ -54,14 +46,11 @@ export default function PedidoDetalleVentas() {
   async function despachar() {
         try {
             setDespachando(true);
-            console.log("🟦 Ejecutando despachar() con ID:", id);
 
-            await moverPedidoADespachados({ 
-            pedidoId: id, 
-            usuario: user 
+            await moverPedidoADespachados({
+            pedidoId: id,
+            usuario: user
             });
-
-            console.log("🟩 moverPedidoADespachados terminó OK");
 
             haptics?.success?.();
             toast.success("Pedido despachado");

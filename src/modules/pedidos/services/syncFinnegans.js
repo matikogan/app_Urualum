@@ -48,7 +48,7 @@ function lastNDaysRange(n = 7) {
 /**
  * Sync enfocada: trae pendientes SOLO del día de hoy.
  */
-export async function syncPendientesDeHoy({ debug = true } = {}) {
+export async function syncPendientesDeHoy({ debug = false } = {}) {
     await waitForAuthUser();
 
     // --- ÚLTIMOS 5 DÍAS ---
@@ -170,7 +170,6 @@ export async function syncPedidosDeHoy(pedidosFinnegans) {
     }
   }
 
-  console.log("[SYNC] resumen agrupado", resumen);
   return resumen;
 }
 
@@ -188,7 +187,7 @@ function getQtyKey(item) {
  * Trae filas del reporte, mapea, AGRUPA por pedido y upsertea una sola vez por pedido.
  * Mantiene la forma de `productos` que expone mapFinDocToPedido, acumulando cantidad por código.
  */
-export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = true } = {}) {
+export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = false } = {}) {
   await waitForAuthUser();
 
 
@@ -205,14 +204,6 @@ export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = true }
 
   if (debug) {
     console.log("[SYNC] rango", { fechaDesde, fechaHasta, totalCrudo: filas.length });
-    console.log("📦 PRIMER PEDIDO CRUDO:", filas[0]);
-    console.log("📦 TODOS LOS IDS:", filas.map(f => f.DOCNROINT || f.NumeroDocumento || f.IdentificacionExterna));
-
-
-    if (filas[0]) {
-      console.log("[SYNC] primera fila (raw)", filas[0]);
-      console.log("[SYNC] keys primera fila", Object.keys(filas[0]));
-    }
   }
 
   // 1) Mapear y agrupar por pedido (id)
@@ -268,7 +259,6 @@ export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = true }
 
   for (const pedido of pedidosMap.values()) {
     if (!pedido?.id) { noId++; skipped++; continue; }
-    console.log("[PERM DEBUG] Pedido antes del UPSERT:", pedido.id, Object.keys(pedido));
     try {
       const res = await upsertPedidoDesdeFinnegans(pedido);
       if (res?.created) created++; else updated++;
@@ -293,7 +283,6 @@ export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = true }
 
   if (debug) console.log("[SYNC] resumen agrupado", resumen);
 
-  // ⬇️ LOGS de depuración ANTES de llamar
   function normalizeNumero(x) {
   return String(x)
     .replace(/\u00A0/g, " ")
@@ -306,9 +295,6 @@ export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = true }
     .map(normalizeNumero)
     .filter(Boolean);
 
-  console.log("[ADESP] numerosFin (muestra 10):", numerosFin.slice(0, 10));
-  console.log("[ADESP] tipos:", numerosFin.slice(0, 5).map(v => typeof v));
-
   await actualizarPedidosControladosADespachado(numerosFin);
 
 
@@ -318,5 +304,3 @@ export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = true }
 }
 
 
-window.syncPendientesDeHoy = syncPendientesDeHoy;
-window.syncNuevosPedidos = syncNuevosPedidos;

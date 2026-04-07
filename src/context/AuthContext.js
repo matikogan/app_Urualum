@@ -28,7 +28,11 @@ export function AuthProvider({ children }) {
         let perfilActual; // Variable para saber qué perfil usar en este momento
 
         if (snap.exists()) {
-          perfilActual = { id: u.uid, ...snap.data() };
+          const data = snap.data();
+          // Normalización: soportar tanto "role" (campo viejo) como "rol" (campo nuevo).
+          // Si el documento solo tiene "role", lo exponemos también como "rol".
+          const rol = data.rol || data.role || "cliente";
+          perfilActual = { id: u.uid, ...data, rol };
           setProfile(perfilActual);
         } else {
           const basic = {
@@ -52,11 +56,7 @@ export function AuthProvider({ children }) {
         try {
           const messaging = await messagingPromise;
           if (messaging) {
-            // 👇 PEGÁ TU CÓDIGO VAPID ACÁ ADENTRO 👇
-            const miLlaveVapid = "BDjZ-1TySYdQ60ARtO_PncUAkycwlz7xx54vEfDhzFUT-DF6Ar3qlryGoQHWJ6hLpOrHp4N0042Ii15NkZqeEcs"; 
-
-            // Pedimos el token (esto le lanza el cartelito de permiso al usuario)
-            const currentToken = await getToken(messaging, { vapidKey: miLlaveVapid });
+            const currentToken = await getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY });
             
             if (currentToken) {
               // Chequeamos si el token es nuevo o cambió, para no guardar en la base de datos sin sentido

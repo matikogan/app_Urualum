@@ -47,7 +47,7 @@ export default function ErroresPreparacionPage() {
       setNextCursor(nc);
     } catch (e) {
       console.error(e);
-      toast.error("No se pudieron cargar los errores");
+      toast.error("No se pudieron cargar los errores. Verifica tu conexión.");
     } finally {
       setLoading(false);
     }

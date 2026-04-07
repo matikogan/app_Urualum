@@ -1,7 +1,7 @@
 import { useAuth } from "../context/AuthContext";
 
 export default function RoleGate({ allow = [], children }) {
-  const { role } = useAuth();
-  if (!allow.includes(role)) return null;
+  const { profile } = useAuth();
+  if (!allow.includes(profile?.rol)) return null;
   return children;
 }

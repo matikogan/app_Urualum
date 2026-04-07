@@ -69,8 +69,7 @@ if ("serviceWorker" in navigator) {
     });
 }
 
-// ⚠️ Reemplazá esta VAPID KEY por la que aparece en Firebase Console...
-const FCM_VAPID_KEY = "BDjZ-1TySYdQ60ARtO_PncUAkycwlz7xx54vEfDhzFUT-DF6Ar3qlryGoQHWJ6hLpOrHp4N0042Ii15NkZqeEcs";
+const FCM_VAPID_KEY = process.env.REACT_APP_FCM_VAPID_KEY;
 
 function NotificationsManager() {
   const { user } = useAuth();
@@ -167,7 +166,6 @@ export default function App() {
             <Route path="/ventas/despachar/:id" element={<ConfirmarDespachoWrapper />} />
             <Route path="/despacho/:id" element={<Despacho />} />
             <Route path="/ventas/despachados" element={<DespachadosHistorico />} />
-            <Route path="/despachados/historico" element={<DespachadosHistorico />} />
 
             {/* Errores */}
             <Route path="/encargado/errores" element={<ErroresPreparacionPage />} />
@@ -175,10 +173,12 @@ export default function App() {
             <Route path="/actitud/nuevo" element={<ActitudCarga />} />
             <Route path="/reporte/semanal" element={<ReporteSemanal />} />
 
-            {/* Página de test Finnegans */}
-            <Route path="/test-finnegans" element={<TestFinnegans />} />
-            <Route path="/test-fs" element={<TestFSPage />} />
-            <Route path="/test-sync" element={<TestSyncPage />} />
+            {/* Páginas de test — solo admin */}
+            <Route element={<ProtectedRoute roles={["admin"]} />}>
+              <Route path="/test-finnegans" element={<TestFinnegans />} />
+              <Route path="/test-fs" element={<TestFSPage />} />
+              <Route path="/test-sync" element={<TestSyncPage />} />
+            </Route>
           </Route>
         </Route>
 

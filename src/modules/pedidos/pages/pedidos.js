@@ -16,6 +16,21 @@ import { db } from "../../../firebase";
 
 
 
+/* ---------------- helper tiempo en estado ---------------- */
+function formatTimeAgo(ts) {
+  if (!ts) return null;
+  const date = ts?.seconds ? new Date(ts.seconds * 1000) : (ts instanceof Date ? ts : new Date(ts));
+  if (isNaN(date.getTime())) return null;
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "ahora";
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h`;
+  const diffD = Math.floor(diffH / 24);
+  return `${diffD}d`;
+}
+
 /* ---------------- helpers de fecha (Finnegans) ---------------- */
 
 function getPedidoDate(p) {
@@ -38,6 +53,10 @@ function daysDiff(a, b) {
 }
 
 const BUCKET_ORDER = ["HOY", "AYER", "ÚLTIMA SEMANA", "ÚLTIMO MES", "ANTERIORES"];
+
+// Zonas operativas para la vista del encargado
+const ESTADOS_ACCION    = ["PENDIENTE_ASIGNAR", "PREPARADO"];
+const ESTADOS_EJECUCION = ["ASIGNADO", "EN_PREPARACION"];
 
 // === adaptadores para el bloque de "enriquecidos" ===
 const parseToDate = (v) => (v instanceof Date ? v : (v ? new Date(v) : null));
@@ -157,8 +176,8 @@ export default function PedidosPage() {
   const [q, setQ] = useState("");      // query de búsqueda
   const [debouncedQ, setDebouncedQ] = useState(""); // para debounce suave
 
-  const isEncargado = (profile?.role || "").toLowerCase() === "encargado";
-  const isVentas = (profile?.role || "").toLowerCase() === "ventas";
+  const isEncargado = (profile?.rol || "").toLowerCase() === "encargado";
+  const isVentas = (profile?.rol || "").toLowerCase() === "ventas";
 
 
   const { play: playNotif, enabled: soundOn, setEnabled: setSoundOn, unlock } =
@@ -184,13 +203,13 @@ export default function PedidosPage() {
   useEffect(() => {
     if (authLoading) return;
     if (!user || !profile) return;
-    const role = (profile?.role || "").toLowerCase();
+    const role = (profile?.rol || "").toLowerCase();
     if (role !== "encargado") return;
     if (syncRunRef.current) return;
     syncRunRef.current = true;
 
     (async () => {
-      try { await syncPendientesDeHoy({ debug: true }); }
+      try { await syncPendientesDeHoy(); }
       catch (e) { console.error("[PedidosPage] sync auto error:", e); }
     })();
   }, [authLoading, user, profile]);
@@ -228,7 +247,6 @@ export default function PedidosPage() {
         const newOnes = list.filter((p) => !prevIds.has(p.id));
 
         if (newOnes.length > 0) {
-          console.log("🔔 NUEVO DESPACHADO:", newOnes);
           setDespachosHasNew(true);
         }
 
@@ -244,16 +262,6 @@ export default function PedidosPage() {
 
   // listener a Firestore (por depósito y método)
   useEffect(() => {
-    // ⛔ si el snapshot anterior ya fue tratado como "altas nuevas", evitamos duplicar
-    if (lastChangeWasNewRef.current) {
-      prevTotalsRef.current = {
-        states: { ...totalsByState },
-        buckets: JSON.parse(JSON.stringify(totalsByStateBucket)),
-      };
-      lastChangeWasNewRef.current = false;
-      return; // no sumamos badges ni sonamos acá; ya se hizo en onChange
-    }
-
     if (authLoading) return;
     if (!user || !profile) return;
     if (!depositoActual) return;
@@ -327,7 +335,9 @@ export default function PedidosPage() {
       },
       onError: (e) => {
         console.error("[PedidosPage] onError listenPedidosByDeposito:", e);
-        toast.error("Error cargando pedidos");
+        toast.error(e?.code === "permission-denied"
+          ? "Sin permisos para ver los pedidos de este depósito."
+          : "No se pudieron cargar los pedidos. Verifica tu conexión.");
         setLoadingPedidos(false);
       },
     });
@@ -418,27 +428,6 @@ export default function PedidosPage() {
       }
     }
 
-    // sumemos los deltas en una sola variable:
-      let deltaTotal = 0;
-      for (const [k, v] of Object.entries(totalsByState)) {
-        const prev = prevS[k] || 0;
-        const d = v - prev;
-        if (d > 0) deltaTotal += d;
-      }
-      for (const [estado, buckets] of Object.entries(totalsByStateBucket)) {
-        const prevBuckets = prevB[estado] || {};
-        for (const b of ["hoy", "ayer", "semana", "mes"]) {
-          const d = (buckets[b] || 0) - (prevBuckets[b] || 0);
-          if (d > 0) deltaTotal += d;
-        }
-      }
-
-      // si hubo nuevas entradas (pedido nuevo o cambio de estado) → ping
-      if (deltaTotal > 0) {
-        playNotif();  // 🔔 sonido
-      }
-
-
     setBadges({ states: nextStateBadges, buckets: nextBucketBadges });
 
     // Actualizamos "previos" para la próxima comparación
@@ -509,6 +498,16 @@ export default function PedidosPage() {
 
 
 
+  // Para encargado: dividir en zonas operativas
+  const zonasEncargado = useMemo(() => {
+    if (!isEncargado) return null;
+    return {
+      accion:    estadosOrdenados.filter(([e]) => ESTADOS_ACCION.includes(e)),
+      ejecucion: estadosOrdenados.filter(([e]) => ESTADOS_EJECUCION.includes(e)),
+      otros:     estadosOrdenados.filter(([e]) => !ESTADOS_ACCION.includes(e) && !ESTADOS_EJECUCION.includes(e)),
+    };
+  }, [isEncargado, estadosOrdenados]);
+
   /* --------- handlers UI --------- */
   function toggleBucket(estado, bucket) {
     const key = `${estado}::${bucket}`;
@@ -534,14 +533,111 @@ export default function PedidosPage() {
       if (next.has(estado)) next.delete(estado); else next.add(estado);
       if (estado === "DESPACHADO") {
         setDespachosHasNew(false);
-      } 
+      }
       return next;
     });
     // si lo abrís, lo marcamos como visto
     markEstadoSeen(estado);
   }
 
+  // Helper: renderiza una sección de estado completa (reutilizado en zonas y vista plana)
+  function renderEstadoSection(estado, porFecha, totalEstado) {
+    const stateClass = `state--${(estado || "").toLowerCase().replaceAll("_", "-")}`;
+    const stateCollapsed = collapsedStates.has(estado);
+    return (
+      <section key={estado} className={`section section--state ${stateClass}`}>
+        <div
+          className="section-title section-title--state"
+          onClick={() => { toggleEstado(estado); clearStateBadge(estado); }}
+          style={{ cursor: "pointer" }}
+        >
+          <Badge count={badges.states?.[estado] || 0} />
+          <span className="state-label">{estado}</span>
+          {estado === "DESPACHADO" && despachosHasNew && (
+            <span style={{ display:"inline-block", width:10, height:10, backgroundColor:"red", borderRadius:"50%", marginLeft:6 }} />
+          )}
+          <span className="state-count">{totalEstado}</span>
+          <span className="chev chev--sm" style={{ display:"inline-block", transform: stateCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition:"transform .15s ease-in-out", marginLeft:8 }}>⌄</span>
+        </div>
 
+        {!stateCollapsed && (
+          <div className="section-children">
+            {Object.entries(porFecha).map(([bucket, items]) => {
+              const key = `${estado}::${bucket}`;
+              const collapsed = collapsedBuckets.has(key);
+              return (
+                <div key={bucket} className="subsection">
+                  <div className="subsection-title" onClick={() => { toggleBucket(estado, bucket); clearBucketBadge(estado, bucket); }} style={{ cursor:"pointer" }}>
+                    <span>{bucket}</span>
+                    <span className="muted">{items.length}</span>
+                    <span className="chev chev--sm" style={{ display:"inline-block", transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)", transition:"transform .15s ease-in-out" }}>⌄</span>
+                  </div>
+                  {!collapsed && (
+                    <div className="subsection-body">
+                      <div className="orders-grid">
+                        {items.map((p) => (
+                          <a key={p.id} href={`/pedidos/${encodeURIComponent(p.id)}`} className="card order-card card--selectable">
+                            <div className="order-head">
+                              <div className="order-number">#{p.numero || p.id}</div>
+                              {getResponsable(p) && (
+                                <span className="pill pill--user" title="Responsable asignado">{getResponsable(p)}</span>
+                              )}
+                              <span className="pill pill--info">{p.metodoEntrega || "—"}</span>
+                              {formatTimeAgo(p.timestamps?.[p.estado]) && (
+                                <span className="pill pill--muted" title={`En estado ${p.estado} desde hace este tiempo`}>
+                                  ⏱ {formatTimeAgo(p.timestamps?.[p.estado])}
+                                </span>
+                              )}
+                            </div>
+                            <div className="order-body">
+                              <div className="order-field">
+                                <span className="order-label">Fecha (Finnegans)</span>
+                                <span className="order-value">{p.finFecha || "—"}</span>
+                              </div>
+                              <div className="order-field">
+                                <span className="order-label">Cliente</span>
+                                <span className="order-value">{p.cliente || "—"}</span>
+                              </div>
+                              <div className="order-field">
+                                <span className="order-label">Depósito</span>
+                                <span className="order-value">{p.deposito || "—"}</span>
+                              </div>
+                              {getResponsable(p) && (
+                                <div className="order-field">
+                                  <span className="order-label">Responsable</span>
+                                  <span className="order-value">{getResponsable(p)}</span>
+                                </div>
+                              )}
+                              <div className="order-field">
+                                <span className="order-label">Ítems</span>
+                                <span className="order-value">{p.productos?.length ?? 0}</span>
+                              </div>
+                              {p.bultos != null && (
+                                <div className="order-field">
+                                  <span className="order-label">Bultos</span>
+                                  <span className="order-value">{p.bultos}</span>
+                                </div>
+                              )}
+                              {p.paquetes != null && (
+                                <div className="order-field">
+                                  <span className="order-label">Paquetes</span>
+                                  <span className="order-value">{p.paquetes}</span>
+                                </div>
+                              )}
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    );
+  }
 
   return (
     <div className="container">
@@ -571,10 +667,10 @@ export default function PedidosPage() {
 
             {/* NUEVO → Informe Despachos (Encargado y Ventas) */}
             <a
-              href="/despachados/historico"
+              href="/ventas/despachados"
               className="btn btn--primary"
               style={{ fontWeight: 600 }}
-              title="Ver informe histórico de despachos"  
+              title="Ver informe histórico de despachos"
             >
               Informe Despachos
             </a>
@@ -623,166 +719,32 @@ export default function PedidosPage() {
         </div>
       )}
 
-            {/* Listado por ESTADO → FECHA */}
-      {!loadingPedidos &&
-        estadosOrdenados.map(([estado, porFecha, totalEstado]) => {
-          const stateClass = `state--${(estado || "").toLowerCase().replaceAll("_", "-")}`;
-          const hasNew = !!stateHasNew[estado];
-          const stateCollapsed = collapsedStates.has(estado);
+      {/* Encargado: zonas operativas */}
+      {!loadingPedidos && isEncargado && zonasEncargado && (
+        <>
+          {zonasEncargado.accion.length > 0 && (
+            <div className="zona-header zona-header--accion">
+              ⚡ Requiere tu acción
+              <span className="zona-count">{zonasEncargado.accion.reduce((s, [,,t]) => s + t, 0)}</span>
+            </div>
+          )}
+          {zonasEncargado.accion.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
 
-          return (
-            <section key={estado} className={`section section--state ${stateClass}`}>
-              <div
-                className="section-title section-title--state"
-                onClick={() => {
-                  toggleEstado(estado);
-                  clearStateBadge(estado);
-                }}
-                style={{ cursor: "pointer" }}
-              >
-                <Badge count={badges.states?.[estado] || 0} />
+          {zonasEncargado.ejecucion.length > 0 && (
+            <div className="zona-header zona-header--ejecucion">
+              ⚙️ En ejecución
+              <span className="zona-count">{zonasEncargado.ejecucion.reduce((s, [,,t]) => s + t, 0)}</span>
+            </div>
+          )}
+          {zonasEncargado.ejecucion.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
 
-                {/* El label del estado ahora tiene clase para poder darle flex:1 */}
-                <span className="state-label">{estado}</span>
+          {zonasEncargado.otros.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
+        </>
+      )}
 
-                {/* Circulito rojo específico para despachos HOY */}
-                {estado === "DESPACHADO" && despachosHasNew && (
-                  <span
-                    style={{
-                      display: "inline-block",
-                      width: 10,
-                      height: 10,
-                      backgroundColor: "red",
-                      borderRadius: "50%",
-                      marginLeft: 6,
-                    }}
-                  />
-                )}
-
-
-                {/* El contador va al final visual del título (antes del chev) */}
-                <span className="state-count">{totalEstado}</span>
-
-                <span
-                  className="chev chev--sm"
-                  style={{
-                    display: "inline-block",
-                    transform: stateCollapsed ? "rotate(-90deg)" : "rotate(0deg)",
-                    transition: "transform .15s ease-in-out",
-                    marginLeft: 8,
-                  }}
-                >
-                  ⌄
-                </span>
-              </div>
-
-
-              {!stateCollapsed && (
-                <div className="section-children">
-                  {Object.entries(porFecha).map(([bucket, items]) => {
-                    const key = `${estado}::${bucket}`;
-                    const collapsed = collapsedBuckets.has(key);
-
-                    return (
-                      <div key={bucket} className="subsection">
-                        <div
-                          className="subsection-title"
-                          onClick={() => {
-                            toggleBucket(estado, bucket);
-                            clearBucketBadge(estado, bucket);
-                          }}
-                          style={{ cursor: "pointer" }}
-                        >
-                          <span>{bucket}</span>
-                          <span className="muted">{items.length}</span>
-                          <span
-                            className="chev chev--sm"
-                            style={{
-                              display: "inline-block",
-                              transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
-                              transition: "transform .15s ease-in-out",
-                            }}
-                          >
-                            ⌄
-                          </span>
-                        </div>
-
-                        {!collapsed && (
-                          <div className="subsection-body">
-                            <div className="orders-grid">
-                              {items.map((p) => (
-                                <a
-                                  key={p.id}
-                                  href={`/pedidos/${encodeURIComponent(p.id)}`}
-                                  className="card order-card card--selectable"
-                                >
-                                  <div className="order-head">
-                                    <div className="order-number">#{p.numero || p.id}</div>
-
-                                    {getResponsable(p) && (
-                                      <span className="pill pill--user" title="Responsable asignado">
-                                        {getResponsable(p)}
-                                      </span>
-                                    )}
-
-                                    <span className="pill pill--info">
-                                      {p.metodoEntrega || "—"}
-                                    </span>
-
-                                    
-                                  </div>
-                                  <div className="order-body">
-                                    <div className="order-field">
-                                      <span className="order-label">Fecha (Finnegans)</span>
-                                      <span className="order-value">{p.finFecha || "—"}</span>
-                                    </div>
-                                    <div className="order-field">
-                                      <span className="order-label">Cliente</span>
-                                      <span className="order-value">{p.cliente || "—"}</span>
-                                    </div>
-                                    <div className="order-field">
-                                      <span className="order-label">Depósito</span>
-                                      <span className="order-value">{p.deposito || "—"}</span>
-                                    </div>
-                                    {getResponsable(p) && (
-                                      <div className="order-field">
-                                        <span className="order-label">Responsable</span>
-                                        <span className="order-value">{getResponsable(p)}</span>
-                                      </div>
-                                    )}
-                                    <div className="order-field">
-                                      <span className="order-label">Ítems</span>
-                                      <span className="order-value">
-                                        {p.productos?.length ?? 0}
-                                      </span>
-                                    </div>
-                                    {p.bultos != null && (
-                                      <div className="order-field">
-                                        <span className="order-label">Bultos</span>
-                                        <span className="order-value">{p.bultos}</span>
-                                      </div>
-                                    )}
-
-                                    {p.paquetes != null && (
-                                      <div className="order-field">
-                                        <span className="order-label">Paquetes</span>
-                                        <span className="order-value">{p.paquetes}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </a>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          );
-        })}
+      {/* Otros roles: lista plana */}
+      {!loadingPedidos && !isEncargado &&
+        estadosOrdenados.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
     </div>
   );
 }

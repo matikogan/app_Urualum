@@ -281,7 +281,23 @@ export async function getResumenStock({
 
 // src/API/finnegans.js
 // === Base ===
-const API_BASE = "https://api.finneg.com/api";
+// Deriva la base de la URL del token para que apunten al mismo entorno (test o prod).
+// Si REACT_APP_FINN_API_BASE está definida, la usa directamente.
+// Si no, la infiere desde REACT_APP_FINN_TOKEN_URL quitando el path "/oauth/token".
+// Fallback final: producción finneg.com
+function resolveApiBase() {
+  if (process.env.REACT_APP_FINN_API_BASE) {
+    return process.env.REACT_APP_FINN_API_BASE.replace(/\/$/, "");
+  }
+  const tokenUrl = process.env.REACT_APP_FINN_TOKEN_URL || "";
+  if (tokenUrl) {
+    // "https://api.teamplace.finneg.com/api/oauth/token" → "https://api.teamplace.finneg.com/api"
+    const match = tokenUrl.match(/^(https?:\/\/[^/]+\/api)/);
+    if (match) return match[1];
+  }
+  return "https://api.finneg.com/api";
+}
+const API_BASE = resolveApiBase();
 
 // === OAuth: obtener token de Finnegans ===
 export async function getFinnegansToken() {
