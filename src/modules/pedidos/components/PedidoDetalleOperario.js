@@ -261,15 +261,6 @@ export default function PedidoDetalleOperario() {
   useEffect(() => { (async () => setLite(await getFlag("MODO_LITE")))(); }, []);
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const p = await getPedido(pedidoId);
-      setPedido(p);
-      setLoading(false);
-    })();
-  }, [pedidoId]);
-
-  useEffect(() => {
     if (!pedido?.productos || !Array.isArray(pedido.productos)) return;
     const codigosURU = Array.from(
       new Set(
@@ -423,25 +414,29 @@ export default function PedidoDetalleOperario() {
                       const raw = it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || it.nombre || "";
                       const uru = toURUCode(raw);
                       const cat = catalogoMap[uru] || {};
-                      const customer = cat?.customerNo || cat?.customer_no || "—";
+                      const customer = cat?.customerNo || cat?.customer_no || toURUCode(raw) || "—";
                       const color = cat?.finish || cat?.color || "—";
                       const k = keyFor(it, i);
-                      const checked = !!checks[k];
+                      const cargado = !!checks[k];
                       return (
-                        <div key={k} className="card product-card">
+                        <div
+                          key={k}
+                          className="card product-card"
+                          style={{ opacity: cargado ? 0.7 : 1 }}
+                        >
                           <div className="product-heading">
                             <span className="product-customer">{customer}</span>
                             <span className="product-color">{color}</span>
                             <span className="pill" style={{ marginLeft: "auto" }}>x{qty}</span>
-                            <label className="ml-2 flex items-center">
-                              <input
-                                type="checkbox"
-                                className="checkbox"
-                                checked={checked}
-                                onChange={() => toggleCheck(k)}
-                              />
-                            </label>
                           </div>
+                          <button
+                            type="button"
+                            className={`btn w-full mt-2 ${cargado ? "btn--success" : "btn--primary"}`}
+                            style={cargado ? { background: "#16a34a", color: "#fff", borderColor: "#16a34a" } : {}}
+                            onClick={() => toggleCheck(k)}
+                          >
+                            {cargado ? "✓ Cargado en pedido" : "Cargar en pedido"}
+                          </button>
                         </div>
                       );
                     })}
@@ -646,8 +641,8 @@ export default function PedidoDetalleOperario() {
         </div>
       )}
 
-      {/* ================= Overlay ÚNICO (SIEMPRE ENCIMA) ================= */}
-      {overlayOpen && (
+      {/* ================= Overlay ÚNICO (SIEMPRE ENCIMA) — solo en modo escáner ================= */}
+      {!lite && overlayOpen && (
         <div
           className="overlay-fixed"
           style={{

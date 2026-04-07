@@ -553,7 +553,7 @@ export default function PedidoDetalle() {
     // 1) hay depósito, 2) el estado requiere asignación, 3) el rol es ENCARGADO
     if (!pedido?.deposito) return;
     if (![ESTADOS.PENDIENTE_ASIGNAR, ESTADOS.ASIGNADO].includes(pedido?.estado)) return;
-    if ((profile?.role || "").toLowerCase() !== "encargado") return;
+    if ((profile?.rol || "").toLowerCase() !== "encargado") return;
 
     let cancelled = false;
     setLoadingOps(true);
@@ -561,7 +561,7 @@ export default function PedidoDetalle() {
       try {
         const qOps = query(
           collection(db, "users"),
-          where("role", "==", "operario"),
+          where("rol", "==", "operario"),
           where("deposito", "==", pedido.deposito)
         );
         const snap = await getDocs(qOps);
@@ -580,7 +580,7 @@ export default function PedidoDetalle() {
       }
     })();
     return () => { cancelled = true; };
-  }, [pedido?.deposito, pedido?.estado, pedido?.operarioId, profile?.role, toast]);
+  }, [pedido?.deposito, pedido?.estado, pedido?.operarioId, profile?.rol, toast]);
 
 
   // buscador de operarios
@@ -597,16 +597,16 @@ const filteredOperarios = useMemo(() => {
 
 
   const puedeAsignarAlguien = useMemo(() => {
-    const role = (profile?.role || "").toLowerCase();
+    const role = (profile?.rol || "").toLowerCase();
     return role === "encargado"; // solo encargado puede asignar a otros
-  }, [profile?.role]);
+  }, [profile?.rol]);
 
   const puedeAutoAsignarse = useMemo(() => {
-    const role = (profile?.role || "").toLowerCase();
+    const role = (profile?.rol || "").toLowerCase();
     // encargado u operario pueden auto-asignarse si el depósito coincide
     return !!pedido?.deposito && (role === "encargado" || role === "operario") &&
       profile?.deposito === pedido.deposito;
-  }, [profile?.role, profile?.deposito, pedido?.deposito]);
+  }, [profile?.rol, profile?.deposito, pedido?.deposito]);
 
   async function handleConfirmarAsignacion() {
     if (!selectedOperario?.uid) {
@@ -666,23 +666,29 @@ const filteredOperarios = useMemo(() => {
 
   async function onComenzar() {
     try {
+      setSaving(true);
       await updateEstado(id, ESTADOS.EN_PREPARACION);
       haptics?.success?.();
       toast.success("Preparación iniciada");
       setPedido(prev => prev ? { ...prev, estado: ESTADOS.EN_PREPARACION } : prev);
     } catch (e) {
       toast.error(e.message || "No se pudo cambiar el estado");
+    } finally {
+      setSaving(false);
     }
   }
 
   async function onFinalizar() {
     try {
+      setSaving(true);
       await updateEstado(id, ESTADOS.PREPARADO);
       haptics?.success?.();
       toast.success("Pedido preparado");
       setPedido(prev => prev ? { ...prev, estado: ESTADOS.PREPARADO } : prev);
     } catch (e) {
       toast.error(e.message || "No se pudo cambiar el estado");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -1048,10 +1054,11 @@ const filteredOperarios = useMemo(() => {
           )}
 
           <button
-            className="w-full py-3 rounded bg-black text-white"
+            className="w-full py-3 rounded bg-black text-white disabled:opacity-60"
             onClick={onComenzar}
+            disabled={saving}
           >
-            Comenzar preparación
+            {saving ? "Iniciando…" : "Comenzar preparación"}
           </button>
         </div>
       )}

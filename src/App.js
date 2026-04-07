@@ -111,7 +111,7 @@ function SmartHome() {
   if (!profile) return null; // Cargando...
 
   // Si tiene código de Finnegans o su rol es "cliente", lo mandamos directo a compras.
-  if (profile.role === "cliente" || profile.finnegansClienteCodigo) {
+  if (profile.rol === "cliente" || profile.finnegansClienteCodigo) {
     return <Navigate to="/mis-pedidos" replace />;
   }
 
@@ -161,11 +161,11 @@ export default function App() {
               <Route path="/ventas/para-despachar" element={<PedidosControladosVentas />} />
               <Route path="/ventas/para-despachar/:id" element={<PedidoDetalleVentas />} />
               <Route path="/ventas/pedidos-web" element={<PedidosWeb />} />
+              <Route path="/ventas/despachar/:id" element={<ConfirmarDespachoWrapper />} />
+              <Route path="/ventas/despachados" element={<DespachadosHistorico />} />
             </Route>
 
-            <Route path="/ventas/despachar/:id" element={<ConfirmarDespachoWrapper />} />
             <Route path="/despacho/:id" element={<Despacho />} />
-            <Route path="/ventas/despachados" element={<DespachadosHistorico />} />
 
             {/* Errores */}
             <Route path="/encargado/errores" element={<ErroresPreparacionPage />} />
