@@ -23,7 +23,8 @@ export default function Inicio() {
   const [limiteResultados, setLimiteResultados] = useState(5);
 
   const name = profile?.nombre || user?.displayName || user?.email?.split("@")[0] || "Usuario";
-  const isVentasOEncargado = profile?.rol === "ventas" || profile?.rol === "encargado" || profile?.rol === "admin";
+  const isVentas = profile?.rol === "ventas" || profile?.rol === "admin";
+  const isEncargadoOOperario = profile?.rol === "encargado" || profile?.rol === "operario";
   const isAdmin = profile?.rol === "admin";
 
   // ==========================================================
@@ -244,7 +245,7 @@ export default function Inicio() {
         </div>
 
         <div className="menu-buttons-adaptive">
-          {isVentasOEncargado && (
+          {isVentas && (
             <>
               <button
                 className="btn btn-big-adaptive btn--elevated"
@@ -262,22 +263,23 @@ export default function Inicio() {
                 <span className="btn-icon">🛒</span>
                 Pedidos Web (Clientes)
               </button>
+
+              <button
+                className="btn btn--outline btn-big-adaptive btn--elevated"
+                onClick={() => setShowMenuErrores(true)}
+              >
+                <span className="btn-icon">🛑</span>
+                Carga Errores
+              </button>
             </>
           )}
-          <button
-            className="btn btn--outline btn-big-adaptive btn--elevated"
-            onClick={() => setShowMenuErrores(true)}
-          >
-            <span className="btn-icon">🛑</span>
-            Carga Errores
-          </button>
 
           <button
             className="btn btn--outline btn-big-adaptive btn--elevated"
             onClick={handlePrepDespacho}
           >
-            <span className="btn-icon">🚚</span>
-            Preparación de Pedidos
+            <span className="btn-icon">{isEncargadoOOperario ? "📦" : "🚚"}</span>
+            {isEncargadoOOperario ? "Gestión de Pedidos" : "Preparación de Pedidos"}
           </button>
 
           {isAdmin && (
