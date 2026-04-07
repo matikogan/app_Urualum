@@ -31,12 +31,16 @@ function toURUCode(value) {
   return s.split(/\s+/)[0].replace(/[^\w-]/g, "");
 }
 
-// Categorías del operario
-const CAT_OPERARIO = ["PERFIL ALUMINIO", "KITS"];
+// Categorías del operario — singular y plural para compatibilidad con Firestore
+const CAT_OPERARIO = ["PERFIL ALUMINIO", "PERFILES ALUMINIO", "KITS"];
 
-// Normaliza categoría desde catalogoProductos
+// Normaliza categoría: usa "padre" cuando categoria es genérica o vacía
 function getCategoriaEnc(uru, catalogoMap) {
-  return (catalogoMap?.[uru]?.categoria || "").toUpperCase().trim();
+  const doc = catalogoMap?.[uru];
+  const cat = (doc?.categoria || "").toUpperCase().trim();
+  const padre = (doc?.padre || "").toUpperCase().trim();
+  if (cat && cat !== "SIN_CATEGORIA") return cat;
+  return padre;
 }
 
 // Divide los productos en grupos

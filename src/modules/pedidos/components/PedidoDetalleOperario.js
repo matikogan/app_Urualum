@@ -164,12 +164,15 @@ export default function PedidoDetalleOperario() {
 
   // ===== Escáner: productos filtrados por categoría =====
   const productosOperario = useMemo(() => {
-    const CAT_OPERARIO = ["PERFIL ALUMINIO", "KITS"];
+    const CAT_OPERARIO = ["PERFIL ALUMINIO", "PERFILES ALUMINIO", "KITS"];
     return (pedido?.productos || []).filter((it) => {
       const raw = it.cod || it.descripcion || it.desc || "";
       const uru = toURUCode(raw);
-      const cat = (catalogoMap?.[uru]?.categoria || "").toUpperCase().trim();
-      return CAT_OPERARIO.includes(cat);
+      const doc = catalogoMap?.[uru];
+      const cat = (doc?.categoria || "").toUpperCase().trim();
+      const padre = (doc?.padre || "").toUpperCase().trim();
+      const efectiva = (cat && cat !== "SIN_CATEGORIA") ? cat : padre;
+      return CAT_OPERARIO.includes(efectiva);
     });
   }, [pedido?.productos, catalogoMap]);
 
