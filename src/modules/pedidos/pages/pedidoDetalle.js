@@ -391,6 +391,9 @@ export default function PedidoDetalle() {
   const [savingErr, setSavingErr] = useState(false);
 
   const [cambiandoOperario, setCambiandoOperario] = useState(false);
+  const [elevarProblema, setElevarProblema] = useState(false);
+  const [notaElevacion, setNotaElevacion] = useState("");
+  const [savingProblema, setSavingProblema] = useState(false);
 
 
 
@@ -1198,6 +1201,275 @@ const filteredOperarios = useMemo(() => {
     );
   }
   // ── Fin vista ASIGNADO ───────────────────────────────────────────────────
+
+  // ── Vista especial EN_PREPARACION para encargado ─────────────────────────
+  if (pedido.estado === ESTADOS.EN_PREPARACION && isEncargado) {
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+    const problema = pedido.problema || null;
+    const tieneProblemaActivo = problema && problema.estado === "PENDIENTE";
+    const tieneProblemaElevado = problema && problema.estado === "ELEVADO";
+    const tieneProblemaRevisado = problema && problema.estado === "REVISADO";
+
+    const getElapsedStr = (ts) => {
+      if (!ts) return null;
+      const at = ts?.toDate ? ts.toDate() : new Date(ts);
+      if (isNaN(at)) return null;
+      const mins = Math.floor((Date.now() - at.getTime()) / 60000);
+      if (mins < 1) return "hace menos de 1 min";
+      if (mins < 60) return `hace ${mins} min`;
+      const hrs = Math.floor(mins / 60);
+      const rem = mins % 60;
+      return rem > 0 ? `hace ${hrs}h ${rem}min` : `hace ${hrs}h`;
+    };
+
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+
+    const operarioNombre = pedido.operarioNombre || "Operario";
+    const avatarInitial = operarioNombre[0]?.toUpperCase() || "?";
+    const elapsedPrep = getElapsedStr(pedido.timestamps?.EN_PREPARACION || pedido.timestamps?.ASIGNADO);
+
+    async function marcarProblemaRevisado() {
+      try {
+        setSavingProblema(true);
+        await updateDoc(doc(db, "pedidos", pedido.id || id), {
+          "problema.estado": "REVISADO",
+        });
+        setPedido(prev => prev ? { ...prev, problema: { ...prev.problema, estado: "REVISADO" } } : prev);
+      } catch (e) {
+        toast.error("No se pudo marcar como revisado");
+      } finally {
+        setSavingProblema(false);
+      }
+    }
+
+    async function confirmarElevacion() {
+      try {
+        setSavingProblema(true);
+        await updateDoc(doc(db, "pedidos", pedido.id || id), {
+          "problema.estado": "ELEVADO",
+          "problema.notaEncargado": notaElevacion.trim(),
+          "problema.elevadoAt": serverTimestamp(),
+        });
+        setPedido(prev => prev ? {
+          ...prev,
+          problema: { ...prev.problema, estado: "ELEVADO", notaEncargado: notaElevacion.trim() },
+        } : prev);
+        setElevarProblema(false);
+        setNotaElevacion("");
+        toast.success("Problema elevado al vendedor");
+      } catch (e) {
+        toast.error("No se pudo elevar el problema");
+      } finally {
+        setSavingProblema(false);
+      }
+    }
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: elevarProblema ? "120px" : "24px" }}>
+
+        {/* ── Header ── */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+          <VolverListaPedidos to="/pedidos" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                Pedido #{pedido.numero || id}
+              </p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
+                {pedido.cliente || "—"}
+              </h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#fef9c3", color: "#854d0e", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>
+              EN PREPARACIÓN
+            </span>
+          </div>
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                📅 {formatFecha(pedido.finFecha)}
+              </span>
+            )}
+            {pedido.metodoEntrega && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🚚 {pedido.metodoEntrega}
+              </span>
+            )}
+            {pedido.deposito && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🏭 {pedido.deposito}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ padding: "16px" }}>
+
+          {/* ── Banner de problema activo ── */}
+          {tieneProblemaActivo && (
+            <div style={{ background: "#fff7ed", border: "1.5px solid #fb923c", borderRadius: "14px", padding: "16px", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                <span style={{ fontSize: "1.1rem" }}>⚠️</span>
+                <p style={{ margin: 0, fontWeight: 700, fontSize: "0.92rem", color: "#9a3412" }}>
+                  Problema reportado por {problema.reportadoNombre || "el operario"}
+                </p>
+                <span style={{ marginLeft: "auto", flexShrink: 0, background: problema.tipo === "FALTA_STOCK" ? "#fef2f2" : "#fef3c7", color: problema.tipo === "FALTA_STOCK" ? "#dc2626" : "#92400e", fontSize: "0.65rem", fontWeight: 700, padding: "2px 8px", borderRadius: "999px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  {problema.tipo === "FALTA_STOCK" ? "Falta stock" : "Otro"}
+                </span>
+              </div>
+              <p style={{ margin: "0 0 4px", fontSize: "0.85rem", color: "#7c2d12", fontWeight: 600 }}>
+                Producto: {problema.productoNombre || "—"}
+              </p>
+              {problema.descripcion && (
+                <p style={{ margin: "4px 0 12px", fontSize: "0.82rem", color: "#9a3412", fontStyle: "italic" }}>
+                  "{problema.descripcion}"
+                </p>
+              )}
+
+              {!elevarProblema ? (
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={marcarProblemaRevisado}
+                    disabled={savingProblema}
+                    style={{ flex: 1, padding: "10px", background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "10px", fontWeight: 600, fontSize: "0.82rem", color: "#475569", cursor: "pointer" }}
+                  >
+                    {savingProblema ? "…" : "Marcar revisado"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setElevarProblema(true)}
+                    style={{ flex: 1, padding: "10px", background: "#dc2626", border: "none", borderRadius: "10px", fontWeight: 600, fontSize: "0.82rem", color: "#fff", cursor: "pointer" }}
+                  >
+                    Elevar al vendedor
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <textarea
+                    value={notaElevacion}
+                    onChange={e => setNotaElevacion(e.target.value)}
+                    placeholder="Agregá una nota para el vendedor (opcional)…"
+                    style={{ width: "100%", minHeight: "70px", padding: "10px", border: "1.5px solid #fca5a5", borderRadius: "10px", fontSize: "0.85rem", resize: "none", boxSizing: "border-box", marginBottom: "8px", background: "#fff" }}
+                  />
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={() => { setElevarProblema(false); setNotaElevacion(""); }}
+                      style={{ flex: 1, padding: "10px", background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "10px", fontWeight: 600, fontSize: "0.82rem", color: "#475569", cursor: "pointer" }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmarElevacion}
+                      disabled={savingProblema}
+                      style={{ flex: 1, padding: "10px", background: "#dc2626", border: "none", borderRadius: "10px", fontWeight: 600, fontSize: "0.82rem", color: "#fff", cursor: "pointer" }}
+                    >
+                      {savingProblema ? "Enviando…" : "Confirmar y elevar"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Banner problema elevado ── */}
+          {tieneProblemaElevado && (
+            <div style={{ background: "#eff6ff", border: "1.5px solid #93c5fd", borderRadius: "14px", padding: "14px 16px", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>📨</span>
+                <p style={{ margin: 0, fontWeight: 600, fontSize: "0.88rem", color: "#1e40af" }}>
+                  Problema elevado al vendedor
+                </p>
+                {problema.notaEncargado && (
+                  <p style={{ margin: "4px 0 0", fontSize: "0.8rem", color: "#3b82f6", fontStyle: "italic" }}>"{problema.notaEncargado}"</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Banner problema revisado ── */}
+          {tieneProblemaRevisado && (
+            <div style={{ background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>✓</span>
+                <p style={{ margin: 0, fontWeight: 600, fontSize: "0.88rem", color: "#64748b" }}>
+                  Problema revisado — en seguimiento
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Operario preparando ── */}
+          <p style={{ margin: "0 0 10px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+            Preparando el pedido
+          </p>
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px", marginBottom: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+              <div style={{
+                width: "48px", height: "48px", borderRadius: "50%", flexShrink: 0,
+                background: "#f59e0b",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: "1.1rem", fontWeight: 700, color: "#fff",
+              }}>
+                {avatarInitial}
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontWeight: 700, fontSize: "1rem", color: "#0f172a" }}>
+                  {operarioNombre}
+                </p>
+                {elapsedPrep && (
+                  <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "#64748b" }}>
+                    🕐 Preparando {elapsedPrep}
+                  </p>
+                )}
+              </div>
+              <div style={{ flexShrink: 0, width: "10px", height: "10px", borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 0 3px #fef3c7" }} />
+            </div>
+          </div>
+
+          {/* ── Productos del pedido ── */}
+          <p style={{ margin: "0 0 10px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+            Contenido · {productos.length} producto{productos.length !== 1 ? "s" : ""}
+          </p>
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px" }}>
+            {productos.length === 0 ? (
+              <p style={{ margin: 0, color: "#94a3b8", fontSize: "0.85rem" }}>Sin productos registrados.</p>
+            ) : (
+              productos.slice(0, 5).map((it, i) => {
+                const raw = it.cod || it.descripcion || it.desc || "";
+                const uru = toURUCode(raw);
+                const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                const esProblemático = problema && problema.productoIdx === i;
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 0", borderBottom: i < Math.min(productos.length, 5) - 1 ? "1px solid #f1f5f9" : "none" }}>
+                    <p style={{ flex: 1, margin: 0, fontSize: "0.86rem", color: esProblemático ? "#dc2626" : "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {esProblemático && "⚠️ "}{nombre}
+                    </p>
+                    <span style={{ flexShrink: 0, background: esProblemático ? "#fef2f2" : "#f1f5f9", color: esProblemático ? "#dc2626" : "#475569", fontWeight: 700, fontSize: "0.82rem", padding: "2px 8px", borderRadius: "8px" }}>
+                      ×{qty}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+            {productos.length > 5 && (
+              <p style={{ margin: "8px 0 0", fontSize: "0.78rem", color: "#94a3b8", textAlign: "center" }}>
+                y {productos.length - 5} más…
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // ── Fin vista EN_PREPARACION ──────────────────────────────────────────────
 
   return (
     <div className="p-3 space-y-4">
