@@ -261,15 +261,6 @@ export default function PedidoDetalleOperario() {
   useEffect(() => { (async () => setLite(await getFlag("MODO_LITE")))(); }, []);
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const p = await getPedido(pedidoId);
-      setPedido(p);
-      setLoading(false);
-    })();
-  }, [pedidoId]);
-
-  useEffect(() => {
     if (!pedido?.productos || !Array.isArray(pedido.productos)) return;
     const codigosURU = Array.from(
       new Set(
