@@ -559,14 +559,16 @@ export default function PedidoDetalle() {
     setLoadingOps(true);
     (async () => {
       try {
-        const qOps = query(
-          collection(db, "users"),
-          where("rol", "==", "operario"),
-          where("deposito", "==", pedido.deposito)
-        );
-        const snap = await getDocs(qOps);
+        // Consultamos ambos campos para compatibilidad con documentos viejos (role) y nuevos (rol)
+        const [snapRol, snapRole] = await Promise.all([
+          getDocs(query(collection(db, "users"), where("rol", "==", "operario"), where("deposito", "==", pedido.deposito))),
+          getDocs(query(collection(db, "users"), where("role", "==", "operario"), where("deposito", "==", pedido.deposito))),
+        ]);
         if (cancelled) return;
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const seen = new Set();
+        const list = [...snapRol.docs, ...snapRole.docs]
+          .filter(d => { if (seen.has(d.id)) return false; seen.add(d.id); return true; })
+          .map(d => ({ id: d.id, ...d.data() }));
         setOperarios(list);
         if (pedido.operarioId) {
           const found = list.find(o => o.id === pedido.operarioId);
