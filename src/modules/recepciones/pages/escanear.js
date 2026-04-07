@@ -1,5 +1,5 @@
 // src/pages/escanear.js
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppContext } from "context/AppContext";
 import { db } from "firebase.js";
@@ -17,6 +17,7 @@ import QRCode from "qrcode";
 import { useAuth } from "context/AuthContext";
 import RoleGate from "components/RoleGate";
 import BackButton from "components/BackButton";
+import Modal from "../../pedidos/components/Modal";
 
 
 function Escanear() {
@@ -28,12 +29,19 @@ function Escanear() {
     setPaquetesEscaneados,
     packingByCode,
     cargarPackingList,
+    toast,
   } = useContext(AppContext);
 
   const { user } = useAuth();
 
   // Mapa { codigoUru: cantidadExtrasGenerados } para esta factura
   const [extrasPorProd, setExtrasPorProd] = useState({});
+
+  // Modal "agregar paquete"
+  const [etiquetaModal, setEtiquetaModal] = useState(null); // { code, qtyPerBundle } | null
+  const [cantInput, setCantInput] = useState("");
+  const [generando, setGenerando] = useState(false);
+  const cantInputRef = useRef(null);
 
   // 1) Cargar packing
   useEffect(() => {
@@ -142,44 +150,39 @@ function Escanear() {
     return base + extras;
   };
 
-  // Encargado: crear N QRs correlativos usando qty_per_bundle del packing
-  const handleCrearEtiqueta = async (codigoMostrado) => {
+  // Encargado: abre modal para agregar paquetes
+  const handleCrearEtiqueta = (codigoMostrado) => {
     const code = String(codigoMostrado).split(" ")[0].trim();
-    const factura = String(facturaSeleccionada?.nroFactura || "");
-
-    // qty_per_bundle fijo desde packing
     const info = packingByCode?.[code];
     const qtyPerBundle = Number(info?.qty_per_bundle || 0);
     if (!qtyPerBundle) {
-      alert(
-        `No hay "qty_per_bundle" para ${code} en packing_list.\n` +
-          `Cargá ese dato para poder generar etiquetas.`
-      );
+      toast?.error?.(`No hay "qty_per_bundle" para ${code} en packing_list. Cargá ese dato para poder generar etiquetas.`);
       return;
     }
+    setCantInput("");
+    setEtiquetaModal({ code, qtyPerBundle });
+    setTimeout(() => cantInputRef.current?.focus(), 100);
+  };
 
-    // Pedir SOLO cuántos paquetes nuevos
-    const cantPktsStr = prompt(
-      `¿Cuántos paquetes querés agregar para el producto ${code}?\n` +
-        `(Cada paquete tendrá ${qtyPerBundle} tiras)`
-    );
-    if (!cantPktsStr) return;
-    const cantPkts = parseInt(cantPktsStr, 10);
+  // Confirmar modal: generar etiquetas
+  const handleConfirmarEtiquetas = async () => {
+    const cantPkts = parseInt(cantInput, 10);
     if (!cantPkts || cantPkts <= 0) {
-      alert("Cantidad de paquetes inválida.");
+      toast?.error?.("Cantidad de paquetes inválida.");
       return;
     }
 
+    const { code, qtyPerBundle } = etiquetaModal;
+    const factura = String(facturaSeleccionada?.nroFactura || "");
+
+    setGenerando(true);
     try {
-      // base del packing (p.ej. 50)
       const base = baseBundlesForCode(code);
-      // máximo PKT actualmente usado (escaneado o generado)
       const maxActual = await getCurrentMaxSeq(code);
-      // arranque del correlativo (respetando que si packing es 50, empiece en 51)
       const start = Math.max(base, maxActual);
 
       for (let i = 1; i <= cantPkts; i++) {
-        const seq = start + i; // 51, 52, 53, ...
+        const seq = start + i;
         const nro_paquete = `${factura}-${code}-PKT-${seq}`;
         const payload = {
           codigo_urualum: code,
@@ -187,7 +190,6 @@ function Escanear() {
           cantidad: qtyPerBundle,
         };
 
-        // Trazabilidad
         await setDoc(doc(db, "etiquetas_generadas", nro_paquete), {
           factura,
           producto: code,
@@ -198,7 +200,6 @@ function Escanear() {
           createdAt: serverTimestamp(),
         });
 
-        // PNG del QR
         const dataUrl = await QRCode.toDataURL(JSON.stringify(payload), {
           errorCorrectionLevel: "M",
           margin: 1,
@@ -207,14 +208,15 @@ function Escanear() {
         downloadDataUrl(dataUrl, `${nro_paquete}.png`);
       }
 
-      alert(
-        `Se generaron ${cantPkts} etiquetas (cada una con ${qtyPerBundle} tiras). ` +
-          `Imprimilas y escaneá normalmente.`
+      toast?.success?.(
+        `Se generaron ${cantPkts} etiqueta${cantPkts > 1 ? "s" : ""} (${qtyPerBundle} tiras c/u). Imprimilas y escaneá normalmente.`
       );
-      // El onSnapshot de etiquetas_generadas actualizará "extrasPorProd" y, por ende, los "Esperados".
+      setEtiquetaModal(null);
     } catch (e) {
       console.error("❌ No se pudieron generar etiquetas:", e);
-      alert("No se pudieron generar etiquetas: " + (e?.message || "desconocido"));
+      toast?.error?.("No se pudieron generar etiquetas: " + (e?.message || "desconocido"));
+    } finally {
+      setGenerando(false);
     }
   };
 
@@ -223,7 +225,7 @@ function Escanear() {
       <div className="container">
         <div className="card empty-card" style={{ marginTop: 24, textAlign: "center" }}>
           <p className="h2" style={{ margin: 0 }}>⚠️ No hay factura seleccionada.</p>
-          <p className="muted">Volvé a “Seleccionar factura” para comenzar una recepción.</p>
+          <p className="muted">Volvé a "Seleccionar factura" para comenzar una recepción.</p>
         </div>
       </div>
     );
@@ -240,7 +242,6 @@ function Escanear() {
   return (
     <div className="container">
       <BackButton to="/factura" />
-      {/* Resumen de la factura */}
       {/* Resumen compacto de factura */}
 <div className="card card--compact" style={{ marginTop: 12, marginBottom: 12 }}>
   <div className="factura-heading">
@@ -264,7 +265,7 @@ function Escanear() {
     const color = packingByCode[code]?.finish || "—";
     const finish = packingByCode[code]?.finish || "—";
 
-    const descResto = item.codigo.replace(code, "").trim(); // descripción del producto
+    const descResto = item.codigo.replace(code, "").trim();
     const progreso = Math.max(0, Math.min(100, Math.round((esc / (esperados || 1)) * 100)));
 
     return (
@@ -333,6 +334,50 @@ function Escanear() {
           </button>
         </div>
       </RoleGate>
+
+      {/* Modal: agregar paquetes extra */}
+      <Modal open={!!etiquetaModal} onClose={() => !generando && setEtiquetaModal(null)}>
+        {etiquetaModal && (
+          <div className="space-y-4">
+            <h3 className="font-bold text-lg">Agregar paquetes</h3>
+            <p className="text-sm text-gray-600">
+              Producto: <strong>{etiquetaModal.code}</strong><br />
+              Tiras por paquete: <strong>{etiquetaModal.qtyPerBundle}</strong>
+            </p>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                ¿Cuántos paquetes querés agregar?
+              </label>
+              <input
+                ref={cantInputRef}
+                type="number"
+                min="1"
+                className="w-full border rounded-lg px-3 py-2 text-base"
+                value={cantInput}
+                onChange={(e) => setCantInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleConfirmarEtiquetas()}
+                disabled={generando}
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                className="flex-1 py-2 rounded-lg border text-gray-700 disabled:opacity-50"
+                onClick={() => setEtiquetaModal(null)}
+                disabled={generando}
+              >
+                Cancelar
+              </button>
+              <button
+                className="flex-1 py-2 rounded-lg bg-black text-white disabled:opacity-50"
+                onClick={handleConfirmarEtiquetas}
+                disabled={generando || !cantInput}
+              >
+                {generando ? "Generando…" : "Generar etiquetas"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
