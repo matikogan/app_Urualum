@@ -332,7 +332,7 @@ export default function PedidoDetalle() {
   const { haptics, toast } = useApp();
   const { user, profile } = useAuth();
 
-  const role = (profile?.role || "").toLowerCase();
+  const role = (profile?.rol || "").toLowerCase();
   const isVentas = role === "ventas";
   const isEncargado = role === "encargado";
 
@@ -939,6 +939,262 @@ const filteredOperarios = useMemo(() => {
   }
   // ── Fin vista PENDIENTE_ASIGNAR ──────────────────────────────────────────
 
+  // ── Vista especial ASIGNADO para encargado ───────────────────────────────
+  if (pedido.estado === ESTADOS.ASIGNADO && isEncargado) {
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+
+    // Tiempo transcurrido desde asignación
+    const getElapsedStr = () => {
+      const ts = pedido.timestamps?.ASIGNADO;
+      if (!ts) return null;
+      const asignadoAt = ts?.toDate ? ts.toDate() : new Date(ts);
+      if (isNaN(asignadoAt)) return null;
+      const mins = Math.floor((Date.now() - asignadoAt.getTime()) / 60000);
+      if (mins < 1) return "hace menos de 1 min";
+      if (mins < 60) return `hace ${mins} min`;
+      const hrs = Math.floor(mins / 60);
+      const rem = mins % 60;
+      return rem > 0 ? `hace ${hrs}h ${rem}min` : `hace ${hrs}h`;
+    };
+    const elapsed = getElapsedStr();
+
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+
+    const operarioNombre = pedido.operarioNombre || "Operario sin nombre";
+    const avatarInitial = operarioNombre[0]?.toUpperCase() || "?";
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: cambiandoOperario ? "88px" : "24px" }}>
+
+        {/* ── Header ── */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+          <VolverListaPedidos to="/pedidos" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                Pedido #{pedido.numero || id}
+              </p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
+                {pedido.cliente || "—"}
+              </h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#dbeafe", color: "#1e40af", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>
+              ASIGNADO
+            </span>
+          </div>
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                📅 {formatFecha(pedido.finFecha)}
+              </span>
+            )}
+            {pedido.metodoEntrega && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🚚 {pedido.metodoEntrega}
+              </span>
+            )}
+            {pedido.deposito && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🏭 {pedido.deposito}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ padding: "16px" }}>
+
+          {/* ── Operario asignado ── */}
+          <p style={{ margin: "0 0 10px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+            Responsable de preparación
+          </p>
+
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px", marginBottom: "12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+              <div style={{
+                width: "48px", height: "48px", borderRadius: "50%", flexShrink: 0,
+                background: "#3b82f6",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: "1.1rem", fontWeight: 700, color: "#fff",
+              }}>
+                {avatarInitial}
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontWeight: 700, fontSize: "1rem", color: "#0f172a" }}>
+                  {operarioNombre}
+                </p>
+                {elapsed && (
+                  <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "#64748b" }}>
+                    🕐 Asignado {elapsed}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Resumen del pedido ── */}
+          <p style={{ margin: "16px 0 10px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+            Contenido · {productos.length} producto{productos.length !== 1 ? "s" : ""}
+          </p>
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "16px" }}>
+            {productos.length === 0 ? (
+              <p style={{ margin: 0, color: "#94a3b8", fontSize: "0.85rem" }}>Sin productos registrados.</p>
+            ) : (
+              productos.slice(0, 5).map((it, i) => {
+                const raw = it.cod || it.descripcion || it.desc || "";
+                const uru = toURUCode(raw);
+                const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 0", borderBottom: i < Math.min(productos.length, 5) - 1 ? "1px solid #f1f5f9" : "none" }}>
+                    <p style={{ flex: 1, margin: 0, fontSize: "0.86rem", color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {nombre}
+                    </p>
+                    <span style={{ flexShrink: 0, background: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: "0.82rem", padding: "2px 8px", borderRadius: "8px" }}>
+                      ×{qty}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+            {productos.length > 5 && (
+              <p style={{ margin: "8px 0 0", fontSize: "0.78rem", color: "#94a3b8", textAlign: "center" }}>
+                y {productos.length - 5} productos más…
+              </p>
+            )}
+          </div>
+
+          {/* ── Cambiar operario ── */}
+          {!cambiandoOperario ? (
+            <button
+              type="button"
+              onClick={() => setCambiandoOperario(true)}
+              style={{
+                width: "100%", padding: "12px", marginBottom: "8px",
+                background: "transparent", border: "1.5px dashed #cbd5e1",
+                borderRadius: "12px", color: "#475569",
+                fontSize: "0.85rem", fontWeight: 600, cursor: "pointer",
+              }}
+            >
+              Cambiar operario
+            </button>
+          ) : (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+                <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                  Elegir nuevo operario
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setCambiandoOperario(false); setSelectedOperario(null); }}
+                  style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "0.8rem", cursor: "pointer", padding: "4px 8px" }}
+                >
+                  Cancelar
+                </button>
+              </div>
+
+              {loadingOps ? (
+                <p style={{ color: "#94a3b8", fontSize: "0.85rem" }}>Cargando operarios…</p>
+              ) : operarios.length === 0 ? (
+                <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px", textAlign: "center" }}>
+                  <p style={{ margin: 0, color: "#94a3b8", fontSize: "0.85rem" }}>No hay operarios disponibles.</p>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "10px" }}>
+                  {operarios
+                    .slice()
+                    .sort((a, b) => (a.nombre || a.email || "").localeCompare(b.nombre || b.email || ""))
+                    .map(o => {
+                      const selected = selectedOperario?.uid === o.id;
+                      return (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => setSelectedOperario(selected ? null : { uid: o.id, nombre: o.nombre || o.email || "Operario" })}
+                          disabled={saving}
+                          style={{
+                            display: "flex", alignItems: "center", gap: "12px",
+                            padding: "14px 16px", textAlign: "left", width: "100%",
+                            background: selected ? "#eff6ff" : "#fff",
+                            border: `1.5px solid ${selected ? "#3b82f6" : "#e2e8f0"}`,
+                            borderRadius: "12px", cursor: "pointer",
+                            transition: "all 0.15s ease",
+                            boxShadow: selected ? "0 0 0 3px rgba(59,130,246,0.12)" : "none",
+                          }}
+                        >
+                          <div style={{
+                            width: "36px", height: "36px", borderRadius: "50%", flexShrink: 0,
+                            background: selected ? "#3b82f6" : "#f1f5f9",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: "0.85rem", fontWeight: 700, color: selected ? "#fff" : "#64748b",
+                            transition: "all 0.15s ease",
+                          }}>
+                            {(o.nombre || o.email || "?")[0].toUpperCase()}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: selected ? "#1d4ed8" : "#1e293b" }}>
+                              {o.nombre || o.email}
+                            </p>
+                            {o.deposito && <p style={{ margin: "1px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>Depósito {o.deposito}</p>}
+                          </div>
+                          {selected && (
+                            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ flexShrink: 0 }}>
+                              <circle cx="9" cy="9" r="9" fill="#3b82f6"/>
+                              <path d="M5 9l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── CTA fijo — confirmar cambio de operario ── */}
+        {cambiandoOperario && (
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 16px 20px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)" }}>
+            <button
+              type="button"
+              disabled={!selectedOperario || saving}
+              onClick={async () => {
+                try {
+                  setSaving(true);
+                  await asignarOperario(id, selectedOperario.uid, selectedOperario.nombre || "Operario");
+                  toast.success("Operario reasignado");
+                  setPedido(prev => prev ? { ...prev, operarioId: selectedOperario.uid, operarioNombre: selectedOperario.nombre } : prev);
+                  setCambiandoOperario(false);
+                  setSelectedOperario(null);
+                } catch (e) {
+                  console.error(e);
+                  toast.error("No se pudo reasignar el operario");
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              style={{
+                width: "100%", padding: "15px", borderRadius: "14px", border: "none",
+                fontWeight: 700, fontSize: "1rem",
+                background: selectedOperario ? "#0f172a" : "#e2e8f0",
+                color: selectedOperario ? "#fff" : "#94a3b8",
+                cursor: selectedOperario ? "pointer" : "not-allowed",
+                transition: "all 0.2s ease",
+              }}
+            >
+              {saving ? "Guardando…" : selectedOperario ? `Reasignar a ${selectedOperario.nombre}` : "Elegí un operario"}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+  // ── Fin vista ASIGNADO ───────────────────────────────────────────────────
+
   return (
     <div className="p-3 space-y-4">
       {/* Header + volver */}
@@ -1219,91 +1475,6 @@ const filteredOperarios = useMemo(() => {
 
 
 
-      {pedido.estado === ESTADOS.ASIGNADO && (
-        <div className="card space-y-3">
-          <div>
-            <p className="text-sm text-gray-600 mb-1">
-              Responsable: <b>{pedido.operarioNombre || "—"}</b>
-            </p>
-            {isEncargado && !cambiandoOperario && (
-              <button
-                className="btn btn--outline btn-sm"
-                onClick={() => setCambiandoOperario(true)}
-              >
-                Cambiar operario
-              </button>
-            )}
-          </div>
-
-          {cambiandoOperario && (
-            <div className="space-y-2">
-              <label className="order-label" htmlFor="select-op">Nuevo operario</label>
-              <select
-                id="select-op"
-                className="w-full border rounded px-3 py-2"
-                value={selectedOperario?.uid || ""}
-                onChange={(e) => {
-                  const uid = e.target.value;
-                  const op = operarios.find(o => o.id === uid);
-                  setSelectedOperario(uid ? { uid, nombre: op?.nombre || op?.email || "Operario" } : null);
-                }}
-              >
-                <option value="">— Seleccionar —</option>
-                {operarios
-                    .slice()
-                    .sort((a,b) => (a.nombre || a.email || "").localeCompare(b.nombre || b.email || ""))
-                    .map(o => (
-                      <option key={o.id} value={o.id}>
-                        {o.nombre || o.email}
-                      </option>
-                    ))}
-              </select>
-
-              <div className="flex gap-2">
-                <button
-                  className="btn btn--outline flex-1"
-                  onClick={() => setCambiandoOperario(false)}
-                >
-                  Cancelar
-                </button>
-
-                <button
-                  className="btn flex-1 bg-black text-white disabled:opacity-60"
-                  disabled={!selectedOperario?.uid}
-                  onClick={async () => {
-                    try {
-                      setSaving(true);
-                      await asignarOperario(id, selectedOperario.uid, selectedOperario.nombre || "Operario");
-                      toast.success("Operario reasignado");
-                      setPedido(prev => prev ? {
-                        ...prev,
-                        operarioId: selectedOperario.uid,
-                        operarioNombre: selectedOperario.nombre
-                      } : prev);
-                      setCambiandoOperario(false);
-                    } catch (e) {
-                      console.error(e);
-                      toast.error("No se pudo reasignar");
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
-                >
-                  Confirmar cambio
-                </button>
-              </div>
-            </div>
-          )}
-
-          <button
-            className="w-full py-3 rounded bg-black text-white disabled:opacity-60"
-            onClick={onComenzar}
-            disabled={saving}
-          >
-            {saving ? "Iniciando…" : "Comenzar preparación"}
-          </button>
-        </div>
-      )}
 
 
       {pedido.estado === ESTADOS.EN_PREPARACION && (
