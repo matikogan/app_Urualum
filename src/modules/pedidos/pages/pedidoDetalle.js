@@ -699,6 +699,246 @@ const filteredOperarios = useMemo(() => {
 
   const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
 
+  // ── Vista especial PENDIENTE_ASIGNAR para encargado ──────────────────────
+  if (pedido.estado === ESTADOS.PENDIENTE_ASIGNAR) {
+    const { operario: prodsOperario, encargado: prodsEncargado } = splitPorCategoria(productos, catalogoMap);
+    const catalogoListo = Object.keys(catalogoMap).length > 0;
+
+    const getNombre = (it, uru) => {
+      const desc = it.descripcion || it.desc || it.nombre || "";
+      if (desc) return desc;
+      return catalogoMap?.[uru]?.customerNo || uru || "—";
+    };
+    const getColor = (uru) => catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
+
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      // Soporta "YYYY-MM-DD" y "DD/MM/YYYY"
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+
+    const ProductRow = ({ it, uru }) => {
+      const nombre = getNombre(it, uru);
+      const color = getColor(uru);
+      const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ margin: 0, fontSize: "0.88rem", fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {nombre}
+            </p>
+            {color && <p style={{ margin: "2px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
+          </div>
+          <span style={{ flexShrink: 0, background: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: "0.82rem", padding: "3px 10px", borderRadius: "8px" }}>
+            ×{qty}
+          </span>
+        </div>
+      );
+    };
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "88px" }}>
+
+        {/* ── Header ── */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+          <VolverListaPedidos to="/pedidos" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                Pedido #{pedido.numero || id}
+              </p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
+                {pedido.cliente || "—"}
+              </h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#fef3c7", color: "#92400e", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>
+              PENDIENTE
+            </span>
+          </div>
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                📅 {formatFecha(pedido.finFecha)}
+              </span>
+            )}
+            {pedido.metodoEntrega && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🚚 {pedido.metodoEntrega}
+              </span>
+            )}
+            {pedido.deposito && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🏭 {pedido.deposito}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ padding: "16px 16px 0" }}>
+
+          {/* ── Contenido del pedido ── */}
+          <p style={{ margin: "0 0 10px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+            Contenido del pedido · {productos.length} producto{productos.length !== 1 ? "s" : ""}
+          </p>
+
+          {/* Sección operario */}
+          {prodsOperario.length > 0 && (
+            <div style={{ background: "#fff", border: "1.5px solid #bfdbfe", borderRadius: "14px", padding: "14px 16px", marginBottom: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                <span style={{ fontSize: "0.68rem", fontWeight: 700, background: "#dbeafe", color: "#1d4ed8", padding: "3px 8px", borderRadius: "999px", letterSpacing: "0.05em" }}>
+                  OPERARIO
+                </span>
+                <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Perfiles y Kits · {prodsOperario.length} ítem{prodsOperario.length !== 1 ? "s" : ""}</span>
+              </div>
+              {prodsOperario.map(({ it, uru }, i) => (
+                <ProductRow key={`op-${uru}-${i}`} it={it} uru={uru} />
+              ))}
+            </div>
+          )}
+
+          {/* Sección encargado */}
+          {prodsEncargado.length > 0 && (
+            <div style={{ background: "#fff", border: "1.5px solid #fed7aa", borderRadius: "14px", padding: "14px 16px", marginBottom: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                <span style={{ fontSize: "0.68rem", fontWeight: 700, background: "#ffedd5", color: "#9a3412", padding: "3px 8px", borderRadius: "999px", letterSpacing: "0.05em" }}>
+                  ENCARGADO
+                </span>
+                <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Accesorios / PVC / Otros · {prodsEncargado.length} ítem{prodsEncargado.length !== 1 ? "s" : ""}</span>
+              </div>
+              {prodsEncargado.map(({ it, uru }, i) => (
+                <ProductRow key={`enc-${uru}-${i}`} it={it} uru={uru} />
+              ))}
+            </div>
+          )}
+
+          {/* Si el catálogo no cargó todavía, mostrar todos sin categorizar */}
+          {!catalogoListo && productos.length > 0 && (
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "10px" }}>
+              <p style={{ margin: "0 0 8px", fontSize: "0.72rem", color: "#94a3b8" }}>Cargando categorías…</p>
+              {productos.map((it, i) => {
+                const raw = it.cod || it.descripcion || it.desc || "";
+                const uru = toURUCode(raw);
+                return <ProductRow key={i} it={it} uru={uru} />;
+              })}
+            </div>
+          )}
+
+          {productos.length === 0 && (
+            <p style={{ color: "#94a3b8", fontSize: "0.85rem", textAlign: "center", padding: "20px 0" }}>Sin productos registrados.</p>
+          )}
+
+          {/* ── Asignar operario ── */}
+          <p style={{ margin: "18px 0 10px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+            Asignar responsable
+          </p>
+
+          {loadingOps ? (
+            <p style={{ color: "#94a3b8", fontSize: "0.85rem" }}>Cargando operarios…</p>
+          ) : operarios.length === 0 ? (
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px", textAlign: "center" }}>
+              <p style={{ margin: 0, color: "#94a3b8", fontSize: "0.85rem" }}>No hay operarios disponibles para el depósito <strong>{pedido.deposito}</strong>.</p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "10px" }}>
+              {operarios
+                .slice()
+                .sort((a, b) => (a.nombre || a.email || "").localeCompare(b.nombre || b.email || ""))
+                .map(o => {
+                  const selected = selectedOperario?.uid === o.id;
+                  return (
+                    <button
+                      key={o.id}
+                      type="button"
+                      onClick={() => setSelectedOperario(selected ? null : { uid: o.id, nombre: o.nombre || o.email || "Operario" })}
+                      disabled={!puedeAsignarAlguien || saving}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "12px",
+                        padding: "14px 16px", textAlign: "left", width: "100%",
+                        background: selected ? "#eff6ff" : "#fff",
+                        border: `1.5px solid ${selected ? "#3b82f6" : "#e2e8f0"}`,
+                        borderRadius: "12px", cursor: "pointer",
+                        transition: "all 0.15s ease",
+                        boxShadow: selected ? "0 0 0 3px rgba(59,130,246,0.12)" : "none",
+                      }}
+                    >
+                      <div style={{
+                        width: "36px", height: "36px", borderRadius: "50%", flexShrink: 0,
+                        background: selected ? "#3b82f6" : "#f1f5f9",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: "0.85rem", fontWeight: 700, color: selected ? "#fff" : "#64748b",
+                        transition: "all 0.15s ease",
+                      }}>
+                        {(o.nombre || o.email || "?")[0].toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: selected ? "#1d4ed8" : "#1e293b" }}>
+                          {o.nombre || o.email}
+                        </p>
+                        {o.deposito && <p style={{ margin: "1px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>Depósito {o.deposito}</p>}
+                      </div>
+                      {selected && (
+                        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ flexShrink: 0 }}>
+                          <circle cx="9" cy="9" r="9" fill="#3b82f6"/>
+                          <path d="M5 9l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </button>
+                  );
+                })}
+            </div>
+          )}
+
+          {/* Auto-asignarme */}
+          {puedeAutoAsignarse && (
+            <button
+              type="button"
+              onClick={handleAutoAsignarme}
+              disabled={saving}
+              style={{
+                width: "100%", padding: "12px", marginBottom: "8px",
+                background: "transparent", border: "1.5px dashed #cbd5e1",
+                borderRadius: "12px", color: "#475569",
+                fontSize: "0.85rem", fontWeight: 600, cursor: "pointer",
+              }}
+            >
+              {saving ? "Guardando…" : "Tomarme el pedido yo mismo"}
+            </button>
+          )}
+
+          {!puedeAsignarAlguien && !puedeAutoAsignarse && (
+            <p style={{ fontSize: "0.78rem", color: "#94a3b8", textAlign: "center" }}>
+              Solo un encargado puede asignar operarios.
+            </p>
+          )}
+        </div>
+
+        {/* ── CTA fijo ── */}
+        {puedeAsignarAlguien && (
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 16px 20px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)" }}>
+            <button
+              type="button"
+              onClick={handleConfirmarAsignacion}
+              disabled={!selectedOperario || saving}
+              style={{
+                width: "100%", padding: "15px", borderRadius: "14px", border: "none",
+                fontWeight: 700, fontSize: "1rem",
+                background: selectedOperario ? "#0f172a" : "#e2e8f0",
+                color: selectedOperario ? "#fff" : "#94a3b8",
+                cursor: selectedOperario ? "pointer" : "not-allowed",
+                transition: "all 0.2s ease",
+              }}
+            >
+              {saving ? "Asignando…" : selectedOperario ? `Asignar a ${selectedOperario.nombre}` : "Seleccioná un operario"}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+  // ── Fin vista PENDIENTE_ASIGNAR ──────────────────────────────────────────
+
   return (
     <div className="p-3 space-y-4">
       {/* Header + volver */}
