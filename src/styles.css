@@ -2860,3 +2860,43 @@ select.w-full.border.rounded {
     pointer-events: none;
   }
 }
+
+/* ===== Zona headers (vista encargado) ===== */
+.zona-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 12px;
+  border-radius: 8px;
+  margin: 16px 0 4px 0;
+}
+.zona-header--accion {
+  background: #fff4e0;
+  color: #b45309;
+  border-left: 3px solid #f59e0b;
+}
+.zona-header--ejecucion {
+  background: #f0f4ff;
+  color: #1e40af;
+  border-left: 3px solid #3b82f6;
+}
+.zona-count {
+  margin-left: auto;
+  background: rgba(0,0,0,.12);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.75rem;
+}
+
+/* Pill muted (tiempo en estado) */
+.pill--muted {
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 8px;
+}

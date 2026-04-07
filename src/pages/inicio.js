@@ -23,8 +23,8 @@ export default function Inicio() {
   const [limiteResultados, setLimiteResultados] = useState(5);
 
   const name = profile?.nombre || user?.displayName || user?.email?.split("@")[0] || "Usuario";
-  const isVentasOEncargado = profile?.role === "ventas" || profile?.role === "encargado" || profile?.role === "admin";
-  const isAdmin = profile?.role === "admin";
+  const isVentasOEncargado = profile?.rol === "ventas" || profile?.rol === "encargado" || profile?.rol === "admin";
+  const isAdmin = profile?.rol === "admin";
 
   // ==========================================================
   // 🔥 LÓGICA DE SINCRONIZACIÓN DE CLIENTES (SOLO ADMIN)
@@ -141,7 +141,7 @@ export default function Inicio() {
   // LÓGICA ORIGINAL DEL ARCHIVO
   // ==========================================================
   const handlePrepDespacho = () => {
-    const role = profile?.role;
+    const role = profile?.rol;
     if (role === "ventas") { navigate("/ventas/para-despachar"); return; }
     if (role === "operario") { navigate("/operario/asignados"); return; }
     navigate("/pedidos");

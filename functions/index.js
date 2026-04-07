@@ -79,7 +79,7 @@ exports.notificarPedidoDespachado = onDocumentCreated(
 
     const usersSnap = await db
       .collection("users")
-      .where("role", "in", ["ventas", "encargado"])
+      .where("rol", "in", ["ventas", "encargado"])
       .get();
 
     const tokens = [];
@@ -114,7 +114,7 @@ exports.notificarPedidoPreparado = onDocumentUpdated(
 
     const usersSnap = await db
       .collection("users")
-      .where("role", "==", "encargado")
+      .where("rol", "==", "encargado")
       .where("deposito", "==", deposito)
       .get();
 
@@ -182,7 +182,7 @@ exports.notificarErrorPreparacion = onDocumentCreated(
 
     const usersSnap = await db
       .collection("users")
-      .where("role", "==", "encargado")
+      .where("rol", "==", "encargado")
       .where("deposito", "==", deposito)
       .get();
 
@@ -236,7 +236,7 @@ exports.notificarVendedorNuevoPedido = onDocumentCreated(
 
     try {
       const usersSnap = await db.collection("users")
-        .where("role", "==", "ventas")
+        .where("rol", "==", "ventas")
         .where("deposito", "==", deposito)
         .get();
 
@@ -291,7 +291,7 @@ exports.crearPedidoInternoDesdeWeb = onDocumentUpdated(
 
       const existente = await db.collection("pedidos").doc(pedidoInternoId).get();
 
-      if (existente.exists()) {
+      if (existente.exists) {
         // El pedido ya fue synced desde Finnegans → solo agregar el link
         await db.collection("pedidos").doc(pedidoInternoId).update({
           webPedidoId: pedidoWebId,
@@ -325,7 +325,7 @@ exports.crearPedidoInternoDesdeWeb = onDocumentUpdated(
 
       // Notificar al encargado del depósito
       const encargadoSnap = await db.collection("users")
-        .where("role",     "==", "encargado")
+        .where("rol",      "==", "encargado")
         .where("deposito", "==", after.depositoAsignado)
         .get();
 

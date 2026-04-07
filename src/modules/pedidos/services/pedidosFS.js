@@ -39,15 +39,6 @@ function sanitizeForFirestore(input) {
 }
 
 
-// DEBUG: verificar que Auth y Firestore usen la MISMA app/proyecto
-console.log(
-  "[pedidosFS] Firestore projectId:",
-  db.app?.options?.projectId,
-  "app:",
-  db.app?.name
-);
-console.log("[pedidosFS] Auth app name:", getAuth().app?.name);
-console.log("[pedidosFS] Current uid:", getAuth().currentUser?.uid ?? null);
 
 // -------------------------------------------------------------
 // LISTEN por depósito (encargado/ventas)
@@ -175,11 +166,6 @@ export async function upsertPedidoFromSync(p) {
   const ref = doc(db, "pedidos", id);
   const snap = await getDoc(ref);
 
-  console.log("[SYNC] intento", {
-    id,
-    codes: [...id].map((c) => c.charCodeAt(0)),
-  });
-
   const payload = {
     id,
     numero: p.numero,
@@ -241,30 +227,15 @@ const OP_KEYS = ["estado", "operarioId", "operarioNombre", "timestamps"];
  * Quita siempre los campos operativos para cumplir reglas de sync.
  */
 export async function upsertPedidoDesdeFinnegans(pedido) {
-
-  console.log(
-    "[PERM TRACE] Iniciando upsert para:",
-    pedido.id,
-    "rol:",
-    (await getDoc(doc(db, "users", getAuth().currentUser.uid))).data()?.role
-  );
-
-
   if (!pedido?.id) throw new Error("pedido.id faltante");
+
   // === NO GUARDAR COTIZACIONES ===
   if (pedido.esCotizacion || pedido.deposito === "COTIZACION") {
-    console.log("[SYNC] Pedido COTIZACION detectado → no se guarda en Firestore:", pedido.id);
     return { skipped: true };
   }
 
   const ref = doc(db, "pedidos", pedido.id);
-
-  // === 1. LEER DOCUMENTO PREVIO ===
-  console.log("[PERM TRACE] Antes de getDoc:", pedido.id);
-
   const prevSnap = await getDoc(ref);
-
-  console.log("[PERM TRACE] getDoc OK:", pedido.id);
 
 
   const prev = prevSnap.exists() ? prevSnap.data() : {};
@@ -315,47 +286,18 @@ export async function upsertPedidoDesdeFinnegans(pedido) {
   // === 3. SANITIZAR ===
   const updateDataFinal = sanitizeForFirestore(updateDataRaw);
 
-  // === 4. DEBUG: CAMPOS ENVIADOS ===
-  console.log("[PERM DEBUG] UPDATE payload keys:", Object.keys(updateDataFinal));
-
-  // === 5. DEBUG: DIFF REAL ===
+  // === 4. DIFF para detección de not-found ===
   let diffKeys = Object.keys(updateDataFinal).filter(
     (k) => JSON.stringify(updateDataFinal[k]) !== JSON.stringify(prev[k])
   );
-  console.log("[PERM DEBUG] diffKeys (lo que Firestore evalúa):", diffKeys);
 
-  // === 6. INTENTAR UPDATE ===
+  // === 5. INTENTAR UPDATE ===
   try {
-    if (process.env.NODE_ENV !== "production") {
-      console.log("[UPSYNC] update", pedido.id, updateDataFinal);
-    }
-
-    console.log("[PERM TRACE] Intentando updateDoc SYNC:", pedido.id, updateDataFinal);
-
     await updateDoc(ref, updateDataFinal);
 
     return { created: false, id: pedido.id };
 
   } catch (e) {
-
-    // ===== DEBUG ERROR UPDATE =====
-    console.error("[UPSYNC][DEBUG] ERROR update:", {
-      pedidoId: pedido.id,
-      uid: getAuth().currentUser?.uid,
-      role:
-        (await (async () => {
-          try {
-            const r = await getDoc(doc(db, "users", getAuth().currentUser?.uid));
-            return r.data()?.role;
-          } catch {
-            return "desconocido";
-          }
-        })()),
-      error: e?.code || e?.message,
-      diffKeys,
-      payload: updateDataFinal
-    });
-
     // Ver si es NOT FOUND para pasar a CREATE
     const code = String(e?.code || e?.message || "").toLowerCase();
     const isNotFound =
@@ -366,9 +308,6 @@ export async function upsertPedidoDesdeFinnegans(pedido) {
   }
 
   // === 7. CREATE si no existía ===
-  console.log("⛳ CREATE START for", pedido.id);
-  console.log("⛳  A) updateDataFinal:", JSON.parse(JSON.stringify(updateDataFinal)));
-
   const createData = sanitizeForFirestore({
     ...updateDataFinal,
     source: "finnegans",
@@ -376,18 +315,8 @@ export async function upsertPedidoDesdeFinnegans(pedido) {
     updatedAt: serverTimestamp(),
   });
 
-  console.log("⛳  B) createData BEFORE sanitize:", JSON.parse(JSON.stringify({
-    ...updateDataFinal,
-    source: "finnegans",
-    timestamps: "TS",
-    updatedAt: "TS"
-  })));
-
-  console.log("⛳  C) createData AFTER sanitize:", JSON.parse(JSON.stringify(createData)));
-
   try {
     await setDoc(ref, createData, { merge: false });
-    console.log("⛳ CREATE SUCCESS for", pedido.id);
   } catch (e) {
     console.error("⛔ CREATE FAILED for", pedido.id, e);
     throw e;
@@ -411,13 +340,9 @@ export async function actualizarPedidosControladosADespachado(numerosFin) {
     const finSet = new Set(finNums);
 
 
-    console.log("[ADESP] ▶️ entrada numerosFin size:", finNums.length);
-    console.log("[ADESP] ▶️ muestra:", finNums.slice(0, 10));
-
     // Traemos todos los pedidos CONTROLADO
     const qy = query(collection(db, "pedidos"), where("estado", "==", "CONTROLADO"));
     const snap = await getDocs(qy);
-    console.log("[ADESP] 📥 CONTROLADO docs:", snap.size);
 
     let updated = 0;
     let skipped = 0;
@@ -426,8 +351,6 @@ export async function actualizarPedidosControladosADespachado(numerosFin) {
     for (const docSnap of snap.docs) {
       const p = docSnap.data();
       const numero = normalizeNumero(p?.numero ?? "");
-
-      console.log("[ADESP] check:", { id: docSnap.id, numero, inFin: finSet.has(numero) });
 
       if (!numero) {
         skipped++;
@@ -447,11 +370,7 @@ export async function actualizarPedidosControladosADespachado(numerosFin) {
         };
 
         try {
-          console.log("[ADESP] intento SYNC", { id: docSnap.id, payload: payloadSync });
-          console.log("[PERM DEBUG][ADESP] SYNC update keys:", Object.keys(payloadSync));
-
           await updateDoc(ref, payloadSync);
-          console.log(`📦 (SYNC) Pedido ${docSnap.id} (${numero}) → DESPACHADO`);
         } catch (eSync) {
           const msg = (eSync?.code || eSync?.message || "").toString().toLowerCase();
           console.warn("[ADESP] SYNC falló, probamos rama Ventas:", msg);
@@ -467,30 +386,12 @@ export async function actualizarPedidosControladosADespachado(numerosFin) {
           };
 
           try {
-            console.log("[ADESP] intento VENTAS", { id: docSnap.id, payload: payloadVentas });
-            console.log("[PERM DEBUG][ADESP] VENTAS update keys:", Object.keys(payloadVentas));
-
             await updateDoc(ref, payloadVentas);
-            console.log(`📦 (VENTAS) Pedido ${docSnap.id} (${numero}) → DESPACHADO`);
           } catch (eVentas) {
-            // Log de depuración detallado (rol + uid + error)
-            const auth = getAuth();
-            const uidErr = auth.currentUser?.uid || null;
-            let role = "desconocido";
-            try {
-              const uref = doc(db, "users", uidErr);
-              const udata = (await getDoc(uref)).data();
-              role = udata?.role || "sin role";
-            } catch {}
-
-            console.error("[ADESP][DEBUG] Permiso denegado en ambos intentos:", {
+            console.error("[ADESP] Permiso denegado en ambos intentos:", {
               id: docSnap.id,
               numero,
-              uid: uidErr,
-              role,
               error: eVentas?.code || eVentas?.message,
-              payloadSync,
-              payloadVentas,
             });
           }
         }
@@ -499,7 +400,6 @@ export async function actualizarPedidosControladosADespachado(numerosFin) {
       }
     }
 
-    console.log("[ADESP] ✅ resumen:", { updated, skipped });
   } catch (error) {
     console.error("❌ [ADESP] Error al actualizar pedidos controlados:", error);
   }

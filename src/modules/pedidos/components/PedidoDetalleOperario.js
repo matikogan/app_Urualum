@@ -1,5 +1,5 @@
 // src/modules/pedidos/pages/PedidoDetalleOperario.js
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useApp } from "../../../context/AppContext";
 import { useAuth } from "../../../context/AuthContext";
@@ -20,9 +20,6 @@ import PackConfirmModal from "./PackConfirmModal";
 import PackErrorModal from "./PackErrorModal";
 import Modal from "./Modal";
 import VolverListaPedidos from "./VolverListaPedidos";
-
-console.info("[OPERARIO DETALLE] SOURCE =", "pages/PedidoDetalleOperario.js v1");
-
 
 // ============== Helpers ==============
 function toURUCode(value) {
@@ -89,6 +86,8 @@ export default function PedidoDetalleOperario() {
   const [pedido, setPedido] = useState(null);
   const [lite, setLite] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [autoStarting, setAutoStarting] = useState(false);
+  const autoStartedRef = useRef(false); // evitar doble llamada a cambiarEstado
 
   // estado por ítem
   const [prep, setPrep] = useState({});
@@ -136,43 +135,21 @@ export default function PedidoDetalleOperario() {
   const [packConfirm, setPackConfirm] = useState(null); // { key, nombre, packSize, remaining, defaultQty } | null
   const [packError, setPackError] = useState(null); // { esperado, qr } | null
 
-  // DEBUG: ver params/auth en consola
-  useEffect(() => {
-    console.log("[Operario] rawId (URL):", rawId);
-    console.log("[Operario] pedidoId (decodificado):", pedidoId);
-    console.log("[Operario] user uid:", user?.uid || null);
-  }, [rawId, pedidoId, user?.uid]);
-
-  // DEBUG: fetch del pedido
   useEffect(() => {
     (async () => {
-      if (!pedidoId) {
-        console.warn("[Operario] Sin pedidoId -> no leo Firestore");
-        return;
-      }
+      if (!pedidoId) return;
       setLoading(true);
-      console.log("[Operario] getPedido(", pedidoId, ") …");
       try {
         const p = await getPedido(pedidoId);
-        console.log("[Operario] getPedido OK:", p);
         setPedido(p || null);
       } catch (e) {
-        console.error("[Operario] getPedido ERROR:", e);
+        console.error("[Operario] error cargando pedido:", e);
         setPedido(null);
       } finally {
         setLoading(false);
       }
     })();
   }, [pedidoId]);
-
-  // DEBUG: cada vez que cambia 'pedido'
-  useEffect(() => {
-    if (pedido) {
-      console.log("[Operario] pedido.estado:", pedido.estado, " productos:", pedido.productos?.length || 0);
-    } else {
-      console.log("[Operario] pedido = null");
-    }
-  }, [pedido]);
 
 
 
@@ -256,6 +233,31 @@ export default function PedidoDetalleOperario() {
   }
 
   // ===== efectos =====
+  // Auto-transición: al abrir un pedido ASIGNADO, comenzar preparación automáticamente
+  useEffect(() => {
+    if (!pedido || !user?.uid) return;
+    if (pedido.estado !== ESTADOS.ASIGNADO) return;
+    if (pedido.operarioId !== user.uid) return;
+    if (autoStartedRef.current) return;
+    autoStartedRef.current = true;
+
+    setAutoStarting(true);
+    (async () => {
+      try {
+        await cambiarEstado(pedidoId, ESTADOS.EN_PREPARACION);
+        const p = await getPedido(pedidoId);
+        setPedido(p);
+      } catch (e) {
+        console.error("[Operario] auto-transition error:", e);
+        toast?.error?.("No se pudo iniciar la preparación. Intentá de nuevo.");
+        autoStartedRef.current = false; // permitir reintento manual
+      } finally {
+        setAutoStarting(false);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedido?.estado, pedido?.operarioId, user?.uid]);
+
   useEffect(() => { (async () => setLite(await getFlag("MODO_LITE")))(); }, []);
 
   useEffect(() => {
@@ -378,9 +380,18 @@ export default function PedidoDetalleOperario() {
       </header>
 
       {pedido.estado === ESTADOS.ASIGNADO && (
-        <button className="w-full py-3 rounded bg-black text-white" onClick={onComenzar}>
-          Comenzar preparación
-        </button>
+        <div className="card card--compact" style={{ textAlign: "center", padding: "16px" }}>
+          {autoStarting ? (
+            <p className="muted">⏳ Iniciando preparación…</p>
+          ) : (
+            <>
+              <p className="muted" style={{ marginBottom: 8 }}>Iniciando preparación automáticamente…</p>
+              <button className="btn btn--primary" onClick={onComenzar}>
+                Comenzar ahora
+              </button>
+            </>
+          )}
+        </div>
       )}
 
       {pedido.estado === ESTADOS.EN_PREPARACION && (
@@ -627,7 +638,13 @@ export default function PedidoDetalleOperario() {
         </div>
       )}
 
-      {pedido.estado === ESTADOS.PREPARADO && <p className="text-sm">Esperando control del Encargado…</p>}
+      {pedido.estado === ESTADOS.PREPARADO && (
+        <div className="card card--compact" style={{ textAlign: "center", padding: "16px" }}>
+          <p style={{ fontSize: "2rem", marginBottom: 4 }}>✅</p>
+          <p className="font-bold">¡Pedido preparado!</p>
+          <p className="muted">Volviendo a tu lista…</p>
+        </div>
+      )}
 
       {/* ================= Overlay ÚNICO (SIEMPRE ENCIMA) ================= */}
       {overlayOpen && (

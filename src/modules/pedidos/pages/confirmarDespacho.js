@@ -17,53 +17,34 @@ export default function ConfirmarDespacho({ pedidoId, onDone }) {
     try {
       setLoading(true);
 
-      // 🔹 SOLO Firestore: pasar a DESPACHADO + metadatos
       const ref = doc(db, "pedidos", String(pedidoId));
-      async function onDespachar() {
-          try {
-            setLoading(true);
+      const snap = await getDoc(ref);
 
-            const ref = doc(db, "pedidos", String(pedidoId));
-            const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        toast.error("El pedido no existe");
+        return;
+      }
 
-            if (!snap.exists()) {
-              toast.error("El pedido no existe");
-              return;
-            }
+      const data = snap.data();
 
-            const data = snap.data();
+      // 1) Guardar en colección de históricos
+      await setDoc(doc(db, "pedidos_despachados", String(pedidoId)), {
+        ...data,
+        estado: "DESPACHADO",
+        despachadoAt: serverTimestamp(),
+        despachadoPor: user?.uid || null,
+        movedAt: serverTimestamp(),
+        source: "app-despacho",
+      });
 
-            // 1) Guardar en colección de históricos
-            await setDoc(doc(db, "pedidos_despachados", String(pedidoId)), {
-              ...data,
-              estado: "DESPACHADO",
-              despachadoAt: serverTimestamp(),
-              despachadoPor: user?.uid || null,
-              movedAt: serverTimestamp(),
-              source: "app-despacho",
-            });
-
-            // 2) Borrar de la colección activa
-            await deleteDoc(ref);
-
-            haptics?.success?.();
-            toast.success("Pedido marcado como DESPACHADO");
-            
-            // 3) Volver a la lista
-            navigate("/pedidos");
-          } catch (e) {
-            console.error(e);
-            haptics?.error?.();
-            toast.error(e?.message || "No se pudo despachar");
-          } finally {
-            setLoading(false);
-          }
-        }
-
+      // 2) Borrar de la colección activa
+      await deleteDoc(ref);
 
       haptics?.success?.();
       toast.success("Pedido marcado como DESPACHADO");
-      navigate("/pedidos"); 
+
+      // 3) Volver a la lista
+      navigate("/pedidos");
     } catch (e) {
       console.error(e);
       haptics?.error?.();
