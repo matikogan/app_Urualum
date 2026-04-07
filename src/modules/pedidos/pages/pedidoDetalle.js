@@ -1471,6 +1471,249 @@ const filteredOperarios = useMemo(() => {
   }
   // ── Fin vista EN_PREPARACION ──────────────────────────────────────────────
 
+  // ── Vista especial PREPARADO para encargado ──────────────────────────────
+  if (pedido.estado === ESTADOS.PREPARADO && isEncargado) {
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+    const { operario: prodsOperario, encargado: prodsEncargado } = splitPorCategoria(productos, catalogoMap);
+
+    // Checkboxes solo para productos del encargado (accesorios)
+    const allAccChecked = prodsEncargado.length === 0 ||
+      prodsEncargado.every((_, i) => !!accChecks[`acc-${i}`]);
+
+    const getElapsedStr = (ts) => {
+      if (!ts) return null;
+      const at = ts?.toDate ? ts.toDate() : new Date(ts);
+      if (isNaN(at)) return null;
+      const mins = Math.floor((Date.now() - at.getTime()) / 60000);
+      if (mins < 1) return "hace menos de 1 min";
+      if (mins < 60) return `hace ${mins} min`;
+      const hrs = Math.floor(mins / 60);
+      const rem = mins % 60;
+      return rem > 0 ? `hace ${hrs}h ${rem}min` : `hace ${hrs}h`;
+    };
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+
+    const operarioNombre = pedido.operarioNombre || "Operario";
+    const avatarInitial = operarioNombre[0]?.toUpperCase() || "?";
+    const elapsedPrep = getElapsedStr(pedido.timestamps?.PREPARADO);
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "88px" }}>
+
+        {/* ── Header ── */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+          <VolverListaPedidos to="/pedidos" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                Pedido #{pedido.numero || id}
+              </p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
+                {pedido.cliente || "—"}
+              </h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#dcfce7", color: "#166534", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>
+              PREPARADO
+            </span>
+          </div>
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                📅 {formatFecha(pedido.finFecha)}
+              </span>
+            )}
+            {pedido.metodoEntrega && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🚚 {pedido.metodoEntrega}
+              </span>
+            )}
+            {pedido.deposito && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🏭 {pedido.deposito}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ padding: "16px" }}>
+
+          {/* ── Preparado por ── */}
+          <p style={{ margin: "0 0 10px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+            Preparado por
+          </p>
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div style={{ width: "40px", height: "40px", borderRadius: "50%", flexShrink: 0, background: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: 700, color: "#fff" }}>
+                {avatarInitial}
+              </div>
+              <div>
+                <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "#0f172a" }}>{operarioNombre}</p>
+                {elapsedPrep && (
+                  <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "#64748b" }}>✓ Listo {elapsedPrep}</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Productos del operario (solo vista) ── */}
+          {prodsOperario.length > 0 && (
+            <>
+              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                Perfiles y kits · {prodsOperario.length} ítem{prodsOperario.length !== 1 ? "s" : ""}
+              </p>
+              <div style={{ background: "#fff", border: "1.5px solid #bfdbfe", borderRadius: "14px", padding: "12px 16px", marginBottom: "12px" }}>
+                {prodsOperario.map(({ it, uru }, i) => {
+                  const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                  const color = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
+                  const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 0", borderBottom: i < prodsOperario.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontSize: "0.86rem", fontWeight: 500, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                        {color && <p style={{ margin: "1px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                        <span style={{ background: "#dbeafe", color: "#1d4ed8", fontWeight: 700, fontSize: "0.78rem", padding: "2px 8px", borderRadius: "6px" }}>×{qty}</span>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="8" fill="#16a34a"/><path d="M4.5 8l2.5 2.5 4.5-4.5" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* ── Accesorios — control del encargado ── */}
+          {prodsEncargado.length > 0 && (
+            <>
+              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                Accesorios / otros · verificar · {prodsEncargado.length} ítem{prodsEncargado.length !== 1 ? "s" : ""}
+              </p>
+              <div style={{ background: "#fff", border: "1.5px solid #fed7aa", borderRadius: "14px", padding: "12px 16px", marginBottom: "12px" }}>
+                {prodsEncargado.map(({ it, uru }, i) => {
+                  const key = `acc-${i}`;
+                  const checked = !!accChecks[key];
+                  const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                  const color = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
+                  const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setAccChecks(prev => ({ ...prev, [key]: !prev[key] }))}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "12px",
+                        width: "100%", textAlign: "left", padding: "10px 0",
+                        background: "transparent", border: "none", cursor: "pointer",
+                        borderBottom: i < prodsEncargado.length - 1 ? "1px solid #f1f5f9" : "none",
+                      }}
+                    >
+                      <div style={{
+                        flexShrink: 0, width: "24px", height: "24px", borderRadius: "6px",
+                        border: `2px solid ${checked ? "#16a34a" : "#e2e8f0"}`,
+                        background: checked ? "#16a34a" : "transparent",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        transition: "all 0.12s ease",
+                      }}>
+                        {checked && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontSize: "0.86rem", fontWeight: 500, color: checked ? "#64748b" : "#1e293b", textDecoration: checked ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                        {color && <p style={{ margin: "1px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
+                      </div>
+                      <span style={{ flexShrink: 0, background: checked ? "#dcfce7" : "#fff7ed", color: checked ? "#15803d" : "#c2410c", fontWeight: 700, fontSize: "0.78rem", padding: "2px 8px", borderRadius: "6px" }}>
+                        ×{qty}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* ── Datos de preparación ── */}
+          <p style={{ margin: "4px 0 10px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+            Datos de preparación
+          </p>
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "12px" }}>
+            <div style={{ display: "flex", gap: "12px" }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, color: "#64748b", marginBottom: "6px" }}>Bultos</label>
+                <input
+                  type="number" min="0"
+                  value={bultos}
+                  onChange={e => setBultos(e.target.value)}
+                  style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: "10px", fontSize: "1rem", fontWeight: 600, textAlign: "center", boxSizing: "border-box" }}
+                  placeholder="0"
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, color: "#64748b", marginBottom: "6px" }}>Paquetes</label>
+                <input
+                  type="number" min="0"
+                  value={paquetes}
+                  onChange={e => setPaquetes(e.target.value)}
+                  style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: "10px", fontSize: "1rem", fontWeight: 600, textAlign: "center", boxSizing: "border-box" }}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={guardarBultosYPaquetes}
+              style={{ marginTop: "10px", width: "100%", padding: "9px", background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: "10px", fontSize: "0.85rem", fontWeight: 600, color: "#475569", cursor: "pointer" }}
+            >
+              Guardar datos
+            </button>
+          </div>
+        </div>
+
+        {/* ── CTA fijo ── */}
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 16px 20px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)" }}>
+          {!allAccChecked && prodsEncargado.length > 0 && (
+            <p style={{ margin: "0 0 8px", textAlign: "center", fontSize: "0.78rem", color: "#94a3b8" }}>
+              Verificá {prodsEncargado.filter((_, i) => !accChecks[`acc-${i}`]).length} accesorio{prodsEncargado.filter((_, i) => !accChecks[`acc-${i}`]).length !== 1 ? "s" : ""} pendiente{prodsEncargado.filter((_, i) => !accChecks[`acc-${i}`]).length !== 1 ? "s" : ""}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                setSaving(true);
+                await updateDoc(doc(db, "pedidos", id), { prepAccesoriosOk: true });
+                await updateEstado(id, ESTADOS.CONTROLADO);
+                haptics?.success?.();
+                toast.success("Pedido controlado ✓");
+                setPedido(prev => prev ? { ...prev, estado: ESTADOS.CONTROLADO } : prev);
+              } catch (e) {
+                toast.error("No se pudo confirmar el control");
+              } finally {
+                setSaving(false);
+              }
+            }}
+            disabled={!allAccChecked || saving}
+            style={{
+              width: "100%", padding: "15px", borderRadius: "14px", border: "none",
+              fontWeight: 700, fontSize: "1rem",
+              background: allAccChecked ? "#0f172a" : "#e2e8f0",
+              color: allAccChecked ? "#fff" : "#94a3b8",
+              cursor: allAccChecked ? "pointer" : "not-allowed",
+              transition: "all 0.2s ease",
+            }}
+          >
+            {saving ? "Confirmando…" : "✓ Confirmar control"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+  // ── Fin vista PREPARADO ───────────────────────────────────────────────────
+
   return (
     <div className="p-3 space-y-4">
       {/* Header + volver */}
