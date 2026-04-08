@@ -235,11 +235,10 @@ export default function PedidosPage() {
     );
 
     const unsub = onSnapshot(qy, (snap) => {
-      const list = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-        estado: "DESPACHADO",
-      }));
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data(), estado: "DESPACHADO" }))
+        // Filtrar por depósito del usuario (en cliente para evitar índice compuesto)
+        .filter((d) => !depositoActual || d.deposito === depositoActual);
 
       // Detectar si hay nuevos
       setDespsHoy((prev) => {

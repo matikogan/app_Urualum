@@ -236,7 +236,9 @@ export default function ControlCarga() {
     setTimeout(() => setToastMsg(null), 3000);
   };
 
-  // ── Suscripción: despachados con metodo AGENCIA (filtro fecha en cliente)
+  const depositoUsuario = profile?.deposito || null;
+
+  // ── Suscripción: despachados con metodo AGENCIA (filtros fecha y depósito en cliente)
   useEffect(() => {
     const desde = startOfWeek(); // Timestamp
     const q = query(
@@ -249,9 +251,12 @@ export default function ControlCarga() {
         .map(d => ({ id: d.id, ...d.data() }))
         .filter(p => {
           const at = p.despachadoAt;
-          if (!at) return true; // incluir si no tiene fecha (pedidos viejos sin campo)
+          if (!at) return true;
           const ms = at?.seconds ? at.seconds * 1000 : new Date(at).getTime();
-          return ms >= desdeMs;
+          if (ms < desdeMs) return false;
+          // Filtrar por depósito del encargado
+          if (depositoUsuario && p.deposito && p.deposito !== depositoUsuario) return false;
+          return true;
         });
       setPedidos(docs);
       setLoading(false);

@@ -7,9 +7,13 @@ import { norm } from "utils/text";
 import VolverListaPedidos from "../components/VolverListaPedidos";
 import DatePicker from "react-datepicker";
 import { es } from "date-fns/locale";
+import { useAuth } from "../../../context/AuthContext";
 
 
 export default function DespachadosHistorico() {
+  const { profile } = useAuth();
+  const depositoUsuario = profile?.deposito || null;
+
   const [pedidos, setPedidos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -18,11 +22,11 @@ export default function DespachadosHistorico() {
     // NUEVO: filtros
     const [fechaDesde, setFechaDesde] = useState("");
     const [fechaHasta, setFechaHasta] = useState("");
-    const [filtroAplicado, setFiltroAplicado] = useState(null); 
+    const [filtroAplicado, setFiltroAplicado] = useState(null);
 
 
 
-  // Listener a colección pedidos_despachados (ordenado por fecha)
+  // Listener a colección pedidos_despachados — filtro depósito en cliente (orderBy impide where extra)
   useEffect(() => {
     const col = collection(db, "pedidos_despachados");
     const qy = query(col, orderBy("despachadoAt", "desc"));
@@ -30,7 +34,9 @@ export default function DespachadosHistorico() {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((d) => !depositoUsuario || d.deposito === depositoUsuario);
         setPedidos(list);
         setLoading(false);
       },
@@ -41,7 +47,7 @@ export default function DespachadosHistorico() {
     );
 
     return () => unsub();
-  }, []);
+  }, [depositoUsuario]);
 
   // Debounce
   useEffect(() => {

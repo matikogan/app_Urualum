@@ -5,6 +5,7 @@ import { db } from "../../../firebase";
 import { norm } from "utils/text";
 import SearchBar from "../components/SearchBar";
 import { useApp } from "../../../context/AppContext";
+import { useAuth } from "../../../context/AuthContext";
 
 /* ── helpers fecha ── */
 function getPedidoDate(p) {
@@ -53,7 +54,9 @@ const METODO_COLORS = {
 /* ── componente ── */
 export default function PedidosControladosVentas() {
   const { toast } = useApp();
+  const { profile } = useAuth();
   const navigate  = useNavigate();
+  const deposito = profile?.deposito || null;
   const [controlados, setControlados] = useState([]);
   const [conProblema, setConProblema]  = useState([]);
   const [despsHoy, setDespsHoy]       = useState([]);
@@ -68,9 +71,11 @@ export default function PedidosControladosVentas() {
 
   /* ── listeners ── */
   useEffect(() => {
-    // 1. Pedidos CONTROLADOS
+    // 1. Pedidos CONTROLADOS — filtrar por depósito si el usuario tiene uno asignado
+    let qCtrl = query(collection(db, "pedidos"), where("estado", "==", "CONTROLADO"));
+    if (deposito) qCtrl = query(qCtrl, where("deposito", "==", deposito));
     const unsubCtrl = onSnapshot(
-      query(collection(db, "pedidos"), where("estado", "==", "CONTROLADO")),
+      qCtrl,
       (snap) => {
         setControlados(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         setLoading(false);
@@ -78,26 +83,33 @@ export default function PedidosControladosVentas() {
       (err) => { console.error(err); setLoading(false); }
     );
 
-    // 2. Pedidos con problema ELEVADO (cualquier estado)
+    // 2. Pedidos con problema ELEVADO — filtrar por depósito
+    let qProb = query(collection(db, "pedidos"), where("problema.estado", "==", "ELEVADO"));
+    if (deposito) qProb = query(qProb, where("deposito", "==", deposito));
     const unsubProb = onSnapshot(
-      query(collection(db, "pedidos"), where("problema.estado", "==", "ELEVADO")),
+      qProb,
       (snap) => setConProblema(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("[Ventas] problemas:", err)
     );
 
-    // 3. Despachados HOY
+    // 3. Despachados HOY — filtro de depósito en cliente (evita índice compuesto con range)
     const today = new Date(); today.setHours(0,0,0,0);
     const end   = new Date(today); end.setHours(23,59,59,999);
     const unsubDesp = onSnapshot(
       query(collection(db, "pedidos_despachados"),
         where("despachadoAt", ">=", today),
         where("despachadoAt", "<=", end)),
-      (snap) => setDespsHoy(snap.docs.map(d => ({ id: d.id, ...d.data(), estado: "DESPACHADO" }))),
+      (snap) => {
+        const list = snap.docs
+          .map(d => ({ id: d.id, ...d.data(), estado: "DESPACHADO" }))
+          .filter(d => !deposito || d.deposito === deposito);
+        setDespsHoy(list);
+      },
       (err) => console.error("[Ventas] despachados:", err)
     );
 
     return () => { unsubCtrl(); unsubProb(); unsubDesp(); };
-  }, []);
+  }, [deposito]);
 
   useEffect(() => {
     const id = setTimeout(() => setDebouncedQ(q), 200);
