@@ -339,8 +339,6 @@ export default function PedidoDetalle() {
   const role = (profile?.rol || "").toLowerCase();
   const isVentas = role === "ventas";
   const isEncargado = role === "encargado";
-  // Cuando el encargado se auto-asignó, actúa como operario en prep.
-  const isSelfAssigned = !!pedido?.operarioId && pedido.operarioId === user?.uid;
 
   
 
@@ -370,6 +368,10 @@ export default function PedidoDetalle() {
   const [pedido, setPedido] = useState(null);
   const [error, setError] = useState(null);
   const [lite, setLite] = useState(false);
+
+  // Cuando el encargado se auto-asignó, actúa como operario en prep.
+  // (definido después de pedido para evitar temporal dead zone)
+  const isSelfAssigned = !!pedido?.operarioId && pedido.operarioId === user?.uid;
 
   // selector de operario
   const [operarios, setOperarios] = useState([]);
