@@ -498,12 +498,33 @@ exports.sincronizarEstadoDeposito = onDocumentUpdated(
     const webPedidoId = after.webPedidoId;
 
     try {
+      // PREPARADO en depósito → pedido_web pasa a EN PREPARACION (en proceso)
       if (after.estado === "PREPARADO") {
         await db.collection("pedidos_web").doc(webPedidoId).update({
-          estado:           "PREPARADO",
+          estado:            "EN PREPARACION",
           fechaUltimaAccion: admin.firestore.FieldValue.serverTimestamp(),
         });
-        logger.info(`pedidos_web/${webPedidoId} → PREPARADO (desde depósito)`);
+        logger.info(`pedidos_web/${webPedidoId} → EN PREPARACION (depósito en PREPARADO)`);
+      }
+
+      // CONTROLADO en depósito → pedido_web pasa a PREPARADO automáticamente
+      // El encargado ya verificó el pedido: el vendedor no necesita intervenir
+      if (after.estado === "CONTROLADO") {
+        await db.collection("pedidos_web").doc(webPedidoId).update({
+          estado:            "PREPARADO",
+          controladoAt:      admin.firestore.FieldValue.serverTimestamp(),
+          fechaUltimaAccion: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        logger.info(`pedidos_web/${webPedidoId} → PREPARADO automático (depósito CONTROLADO)`);
+      }
+
+      // DESPACHADO en depósito → pedido_web pasa a ENTREGADO automáticamente
+      if (after.estado === "DESPACHADO") {
+        await db.collection("pedidos_web").doc(webPedidoId).update({
+          estado:            "ENTREGADO",
+          fechaUltimaAccion: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        logger.info(`pedidos_web/${webPedidoId} → ENTREGADO automático (depósito DESPACHADO)`);
       }
     } catch (error) {
       logger.error("Error en sincronizarEstadoDeposito:", error);
