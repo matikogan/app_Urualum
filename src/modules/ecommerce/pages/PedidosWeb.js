@@ -55,6 +55,9 @@ export default function PedidosWeb() {
 
   const [toastMsg, setToastMsg]         = useState(null);
 
+  // Selector de sucursal: deposito elegido para preparar (puede diferir del cliente)
+  const [depositoPrep, setDepositoPrep] = useState(null);
+
   // V8: estado de ordenamiento
   const [sortCol, setSortCol] = useState("fecha");
   const [sortDir, setSortDir] = useState("desc");
@@ -104,6 +107,7 @@ export default function PedidosWeb() {
       return;
     }
     setPedidoSeleccionado(pedido);
+    setDepositoPrep(pedido.depositoAsignado || "R8"); // default = lo que eligió el cliente
     setMostrandoFormError(false);
     setItemsError({});
     setNotaGeneral("");
@@ -190,12 +194,17 @@ export default function PedidosWeb() {
     }));
   };
 
-  // ── Stock relevante según depósito del pedido ────────────
+  // ── Stock relevante según depósito elegido para preparación ─────────────
+  // Para pedidos NUEVO usamos depositoPrep (puede diferir del cliente);
+  // para el resto usamos el depositoAsignado real del pedido.
   const getStockRelevante = (codigo) => {
     if (!pedidoSeleccionado) return null;
     const stock = stockPorProducto[codigo];
     if (!stock) return null;
-    return pedidoSeleccionado.depositoAsignado === "ISABELA" ? stock.isa : stock.r8;
+    const dep = pedidoSeleccionado.estado === "NUEVO"
+      ? (depositoPrep || pedidoSeleccionado.depositoAsignado)
+      : pedidoSeleccionado.depositoAsignado;
+    return dep === "ISABELA" ? stock.isa : stock.r8;
   };
 
   // ── V8: Toggle de columna de ordenamiento ────────────────
@@ -358,7 +367,10 @@ export default function PedidosWeb() {
                       <td style={{ fontWeight: 700, fontSize: "13px", whiteSpace: "nowrap" }}>{p.finnegansId}</td>
                       <td style={{ fontSize: "13px" }}>{p.clienteNombre}</td>
                       <td style={{ fontSize: "13px", color: "#64748b", whiteSpace: "nowrap" }}>
-                        {p.fecha?.toDate().toLocaleDateString("es-UY", { day: "2-digit", month: "short" })}
+                        <div>{p.fecha?.toDate().toLocaleDateString("es-UY", { day: "2-digit", month: "short" })}</div>
+                        <div style={{ fontSize: "11px", color: "#94a3b8" }}>
+                          {p.fecha?.toDate().toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" })}
+                        </div>
                       </td>
                       <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>${p.total?.toFixed(0)}</td>
                       <td style={{ whiteSpace: "nowrap" }}><EstadoPill estado={p.estado} /></td>
@@ -407,13 +419,13 @@ export default function PedidosWeb() {
                     </button>
                   </div>
                 </div>
-                <div className="meta" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+                <div className="meta" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginBottom: "8px" }}>
                   <div className="meta-item">
                     <span className="meta-label">Cliente</span>
                     <span className="meta-value">{pedidoSeleccionado.clienteNombre}</span>
                   </div>
                   <div className="meta-item">
-                    <span className="meta-label">Entrega</span>
+                    <span className="meta-label">Retiro solicitado</span>
                     <span className="meta-value">{pedidoSeleccionado.metodoEntrega || "—"}</span>
                   </div>
                   <div className="meta-item">
@@ -421,6 +433,16 @@ export default function PedidosWeb() {
                     <span className="meta-value" style={{ fontWeight: 700 }}>
                       {pedidoSeleccionado.metodoPago || "No especificado"}
                       {pedidoSeleccionado.metodoPago === "Transferencia" && ` (${pedidoSeleccionado.bancoTransferencia})`}
+                    </span>
+                  </div>
+                  <div className="meta-item">
+                    <span className="meta-label">Confirmado</span>
+                    <span className="meta-value" style={{ fontSize: "12px" }}>
+                      {pedidoSeleccionado.fecha?.toDate
+                        ? pedidoSeleccionado.fecha.toDate().toLocaleString("es-UY", {
+                            day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+                          })
+                        : "—"}
                     </span>
                   </div>
                 </div>
@@ -435,13 +457,16 @@ export default function PedidosWeb() {
                     const sr = getStockRelevante(item.codigo);
                     return sr !== null && sr < item.cantidad;
                   });
+                  const depMostrar = pedidoSeleccionado.estado === "NUEVO"
+                    ? (depositoPrep || pedidoSeleccionado.depositoAsignado)
+                    : pedidoSeleccionado.depositoAsignado;
                   return insuficientes.length > 0 ? (
                     <div className="banner banner--error" style={{ marginBottom: "12px" }}>
-                      ⚠️ <strong>{insuficientes.length} producto{insuficientes.length > 1 ? "s" : ""} sin stock suficiente</strong> en {pedidoSeleccionado.depositoAsignado}
+                      ⚠️ <strong>{insuficientes.length} producto{insuficientes.length > 1 ? "s" : ""} sin stock suficiente</strong> en {depMostrar}
                     </div>
                   ) : (
                     <div className="banner banner--ok" style={{ marginBottom: "12px" }}>
-                      ✅ <strong>Stock suficiente</strong> para todos los productos
+                      ✅ <strong>Stock suficiente</strong> en {depMostrar} para todos los productos
                     </div>
                   );
                 })()}
@@ -524,7 +549,10 @@ export default function PedidosWeb() {
                           const stock = stockPorProducto[item.codigo];
                           const stockRelevante = getStockRelevante(item.codigo);
                           const faltaStock = !loadingStock && stock && stockRelevante < item.cantidad;
-                          const esDepIsa = pedidoSeleccionado.depositoAsignado === "ISABELA";
+                          const depEfectivo = pedidoSeleccionado.estado === "NUEVO"
+                            ? (depositoPrep || pedidoSeleccionado.depositoAsignado)
+                            : pedidoSeleccionado.depositoAsignado;
+                          const esDepIsa = depEfectivo === "ISABELA";
                           return (
                             <tr key={i}>
                               <td>
@@ -649,13 +677,59 @@ export default function PedidosWeb() {
                   <div style={{ display: "flex", gap: "10px" }}>
 
                     {pedidoSeleccionado.estado === "NUEVO" && (
-                      <button
-                        onClick={() => cambiarEstado(pedidoSeleccionado.id, "EN PREPARACION")}
-                        className="btn bg-warn"
-                        style={{ flex: 1, color: "#fff" }}
-                      >
-                        🟡 Comenzar Preparación
-                      </button>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
+
+                        {/* Selector de sucursal */}
+                        <div style={{
+                          background: "#f8fafc",
+                          border: "1.5px solid #e2e8f0",
+                          borderRadius: "10px",
+                          padding: "12px 14px",
+                        }}>
+                          <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                            🏭 ¿Dónde se prepara?
+                          </div>
+                          <div style={{ display: "flex", gap: "8px" }}>
+                            {["R8", "ISABELA"].map(dep => (
+                              <button
+                                key={dep}
+                                onClick={() => setDepositoPrep(dep)}
+                                style={{
+                                  flex: 1,
+                                  padding: "8px 0",
+                                  border: "2px solid",
+                                  borderColor: depositoPrep === dep ? "var(--brand, #2563eb)" : "#e2e8f0",
+                                  borderRadius: "8px",
+                                  background: depositoPrep === dep ? "#eff6ff" : "#fff",
+                                  color: depositoPrep === dep ? "#2563eb" : "#64748b",
+                                  fontWeight: depositoPrep === dep ? 700 : 500,
+                                  fontSize: "13px",
+                                  cursor: "pointer",
+                                  transition: "all 0.15s",
+                                }}
+                              >
+                                {dep === "R8" ? "📍 Ruta 8" : "📍 Isabela"}
+                              </button>
+                            ))}
+                          </div>
+                          {depositoPrep && depositoPrep !== pedidoSeleccionado.depositoAsignado && (
+                            <p style={{ margin: "8px 0 0", fontSize: "12px", color: "#b45309", background: "#fef3c7", padding: "6px 10px", borderRadius: "6px" }}>
+                              ⚠️ El cliente solicitó retiro en <strong>{pedidoSeleccionado.depositoAsignado}</strong>. Se preparará en <strong>{depositoPrep}</strong>.
+                            </p>
+                          )}
+                        </div>
+
+                        <button
+                          onClick={() => cambiarEstado(pedidoSeleccionado.id, "EN PREPARACION", {
+                            depositoAsignado: depositoPrep || pedidoSeleccionado.depositoAsignado,
+                          })}
+                          className="btn bg-warn"
+                          style={{ color: "#fff" }}
+                          disabled={!depositoPrep}
+                        >
+                          🟡 Comenzar Preparación en {depositoPrep === "ISABELA" ? "Isabela" : "Ruta 8"}
+                        </button>
+                      </div>
                     )}
 
                     {pedidoSeleccionado.estado === "EN PREPARACION" && (
