@@ -2756,7 +2756,7 @@ select.w-full.border.rounded {
 .bg-ok   { background: var(--ok) !important; }
 .bg-warn { background: #f59e0b !important; }
 
-/* V5: Layout split — lista izquierda, panel derecha */
+/* Layout split — lista izquierda, panel derecha */
 .pedidosweb-layout {
   display: grid;
   grid-template-columns: 1fr;
@@ -2764,16 +2764,22 @@ select.w-full.border.rounded {
 }
 @media (min-width: 768px) {
   .pedidosweb-layout {
-    grid-template-columns: minmax(390px, 44%) 1fr;
+    grid-template-columns: minmax(320px, 36%) 1fr;
     height: calc(100vh - 134px);
     overflow: hidden;
     align-items: stretch;
+    gap: 14px;
   }
   .pedidosweb-left  { overflow-y: auto; }
   .pedidosweb-right { overflow-y: auto; }
 }
+@media (min-width: 1280px) {
+  .pedidosweb-layout {
+    grid-template-columns: minmax(340px, 32%) 1fr;
+  }
+}
 
-/* V5: Panel de detalle (reemplaza modal) */
+/* Panel de detalle */
 .pedidosweb-panel {
   display: flex;
   flex-direction: column;
@@ -2785,7 +2791,7 @@ select.w-full.border.rounded {
   overflow: hidden;
 }
 .pedidosweb-panel__header {
-  padding: 16px 20px;
+  padding: 16px 24px;
   border-bottom: 1px solid #eef2f7;
   flex-shrink: 0;
   background: #fafbfc;
@@ -2793,16 +2799,42 @@ select.w-full.border.rounded {
 .pedidosweb-panel__body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: 16px 24px;
 }
 .pedidosweb-panel__footer {
-  padding: 14px 20px;
+  padding: 14px 24px;
   border-top: 1px solid #eef2f7;
   flex-shrink: 0;
   background: #fafbfc;
 }
 
-/* V7: Placeholder cuando no hay pedido seleccionado */
+/* Meta grid — 4 cols en desktop */
+.pedidosweb-panel__header .meta {
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (min-width: 900px) {
+  .pedidosweb-panel__header .meta {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* Tabla de stock — sin scroll horizontal */
+.pedidosweb-stock-table {
+  width: 100%;
+  table-layout: fixed;
+}
+.pedidosweb-stock-table td,
+.pedidosweb-stock-table th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pedidosweb-stock-table col.col-producto  { width: 46%; }
+.pedidosweb-stock-table col.col-cant      { width: 10%; }
+.pedidosweb-stock-table col.col-dep       { width: 12%; }
+.pedidosweb-stock-table col.col-estado    { width: 14%; }
+
+/* Placeholder cuando no hay pedido seleccionado */
 .pedidosweb-placeholder {
   display: flex;
   flex-direction: column;
