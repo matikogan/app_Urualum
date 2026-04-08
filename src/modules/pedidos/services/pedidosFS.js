@@ -9,6 +9,7 @@ import {
   where,
   setDoc,
   updateDoc,
+  writeBatch,
   serverTimestamp,
   Timestamp,
 } from "firebase/firestore";
@@ -446,6 +447,50 @@ export function listenPedidosAsignadosOperario(operarioId, opts = {}) {
       })
   );
   
+}
+
+/**
+ * Compara los IDs activos en Finnegans (del sync) con los pedidos PENDIENTE_ASIGNAR
+ * en Firestore de los últimos N días. Los que no volvieron de Finnegans → ANULADO.
+ * Solo toca pedidos con estado PENDIENTE_ASIGNAR (si ya avanzaron, no se tocan).
+ */
+export async function marcarAnuladosEnRango(idsActivosEnFinnegans, fechaDesde) {
+  // idsActivosEnFinnegans: Set de IDs normalizados (sin prefijo "PEDVTA - ")
+  const qy = query(
+    collection(db, "pedidos"),
+    where("estado", "==", "PENDIENTE_ASIGNAR"),
+    where("source", "==", "finnegans"),
+  );
+  const snap = await getDocs(qy);
+
+  const batch = writeBatch(db);
+  let count = 0;
+
+  for (const docSnap of snap.docs) {
+    const data = docSnap.data();
+
+    // Solo anular pedidos cuya fecha de Finnegans cae dentro del rango del sync
+    const finFecha = data.finFecha?.toDate?.()
+      || (data.finFecha ? new Date(data.finFecha) : null);
+    if (!finFecha || finFecha < fechaDesde) continue;
+
+    // Normalizar ID: quitar prefijo "PEDVTA - " para comparar con los de Finnegans
+    const idNorm = docSnap.id.replace(/^PEDVTA\s*-\s*/i, "").trim();
+
+    if (!idsActivosEnFinnegans.has(idNorm) && !idsActivosEnFinnegans.has(docSnap.id)) {
+      batch.update(docSnap.ref, {
+        estado: "ANULADO",
+        anuladoAt: serverTimestamp(),
+        anuladoMotivo: "Pedido no encontrado en Finnegans durante sincronización automática",
+        anuladoOrigen: "auto-sync",
+        updatedAt: serverTimestamp(),
+      });
+      count++;
+    }
+  }
+
+  if (count > 0) await batch.commit();
+  return count;
 }
 
 export async function corregirPedidosSinEstado() {

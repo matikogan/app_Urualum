@@ -394,6 +394,9 @@ export default function PedidoDetalle() {
   const [elevarProblema, setElevarProblema] = useState(false);
   const [notaElevacion, setNotaElevacion] = useState("");
   const [savingProblema, setSavingProblema] = useState(false);
+  const [showAnularModal, setShowAnularModal] = useState(false);
+  const [motivoAnulacion, setMotivoAnulacion] = useState("");
+  const [savingAnulacion, setSavingAnulacion] = useState(false);
 
 
 
@@ -427,6 +430,29 @@ export default function PedidoDetalle() {
 
 
   // confirmar control → pasa a CONTROLADO
+  async function anularPedido() {
+    if (!motivoAnulacion.trim()) return;
+    try {
+      setSavingAnulacion(true);
+      await updateDoc(doc(db, "pedidos", id), {
+        estado: "ANULADO",
+        anuladoAt: serverTimestamp(),
+        anuladoMotivo: motivoAnulacion.trim(),
+        anuladoOrigen: "encargado-manual",
+        anuladoPor: profile?.uid || null,
+        updatedAt: serverTimestamp(),
+      });
+      toast.success("Pedido anulado");
+      setShowAnularModal(false);
+      navigate("/pedidos");
+    } catch (e) {
+      console.error(e);
+      toast.error("Error al anular el pedido");
+    } finally {
+      setSavingAnulacion(false);
+    }
+  }
+
   async function confirmControl() {
   try {
     await updateDoc(doc(db, "pedidos", id), {
@@ -2299,6 +2325,71 @@ const filteredOperarios = useMemo(() => {
           <p className="text-sm text-gray-600 mb-2">
             Estado: <b>DESPACHADO</b>. Pedido finalizado.
           </p>
+        </div>
+      )}
+
+      {/* ── Botón anular — solo encargado, solo pedidos no finalizados ── */}
+      {isEncargado && pedido.estado !== ESTADOS.DESPACHADO && pedido.estado !== "ANULADO" && (
+        <div style={{ marginTop: "8px", paddingTop: "16px", borderTop: "1px dashed #e2e8f0" }}>
+          <button
+            onClick={() => { setMotivoAnulacion(""); setShowAnularModal(true); }}
+            style={{
+              width: "100%", padding: "10px", fontSize: "13px", fontWeight: 600,
+              background: "none", border: "1.5px solid #fca5a5", color: "#dc2626",
+              borderRadius: "8px", cursor: "pointer",
+            }}
+          >
+            🚫 Anular pedido
+          </button>
+        </div>
+      )}
+
+      {/* ── Modal confirmación anulación ── */}
+      {showAnularModal && (
+        <div
+          onClick={() => setShowAnularModal(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "flex-end" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", width: "100%", borderRadius: "16px 16px 0 0", padding: "24px 20px" }}
+          >
+            <h3 style={{ margin: "0 0 6px", fontSize: "17px", fontWeight: 700, color: "#dc2626" }}>
+              🚫 Anular pedido #{pedido.numero || id}
+            </h3>
+            <p style={{ margin: "0 0 16px", fontSize: "13px", color: "#64748b" }}>
+              Esta acción no se puede deshacer. El pedido dejará de aparecer en la lista operativa.
+            </p>
+            <label style={{ fontSize: "12px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
+              Motivo de anulación *
+            </label>
+            <textarea
+              className="input"
+              rows={3}
+              placeholder="Ej: Pedido duplicado, cliente canceló, error en el pedido…"
+              value={motivoAnulacion}
+              onChange={e => setMotivoAnulacion(e.target.value)}
+              style={{ fontSize: "14px", resize: "none", marginBottom: "14px" }}
+              autoFocus
+            />
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button
+                onClick={() => setShowAnularModal(false)}
+                className="btn btn--ghost"
+                style={{ flex: 1 }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={anularPedido}
+                disabled={savingAnulacion || !motivoAnulacion.trim()}
+                className="btn btn--danger"
+                style={{ flex: 2 }}
+              >
+                {savingAnulacion ? "Anulando…" : "Confirmar anulación"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

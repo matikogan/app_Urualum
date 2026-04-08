@@ -11,12 +11,12 @@ export default function ConfirmarDespacho({ pedidoId, onDone }) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const [pedido, setPedido]       = useState(null);
-  const [agencia, setAgencia]     = useState(null);  // agencia elegida por el vendedor
-  const [loading, setLoading]     = useState(false);
-  const [loadingData, setLoadingData] = useState(true);
+  const [pedido, setPedido]             = useState(null);
+  const [agencia, setAgencia]           = useState(null);
+  const [showSelector, setShowSelector] = useState(false);
+  const [loading, setLoading]           = useState(false);
+  const [loadingData, setLoadingData]   = useState(true);
 
-  // Cargar datos del pedido para saber si es AGENCIA
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -25,8 +25,7 @@ export default function ConfirmarDespacho({ pedidoId, onDone }) {
         if (!cancelled && snap.exists()) {
           const data = snap.data();
           setPedido(data);
-          // Pre-rellenar con la agencia detectada automáticamente
-          if (data.agencia) setAgencia(data.agencia);
+          setAgencia(data.agencia || null);
         }
       } finally {
         if (!cancelled) setLoadingData(false);
@@ -44,11 +43,9 @@ export default function ConfirmarDespacho({ pedidoId, onDone }) {
       if (!snap.exists()) { toast.error("El pedido no existe"); return; }
       const data = snap.data();
 
-      // 1) Guardar en colección de históricos
       await setDoc(doc(db, "pedidos_despachados", String(pedidoId)), {
         ...data,
         estado: "DESPACHADO",
-        // Si es agencia, confirmar cuál (puede diferir del auto-detectado)
         ...(data.metodoEntrega === "AGENCIA" && agencia ? { agencia } : {}),
         despachadoAt: serverTimestamp(),
         despachadoPor: user?.uid || null,
@@ -56,14 +53,10 @@ export default function ConfirmarDespacho({ pedidoId, onDone }) {
         source: "app-despacho",
       });
 
-      // 2) Borrar de la colección activa
       await deleteDoc(ref);
-
       haptics?.success?.();
       toast.success("Pedido marcado como DESPACHADO");
-
-      if (onDone) onDone();
-      else navigate("/pedidos");
+      if (onDone) onDone(); else navigate("/pedidos");
     } catch (e) {
       console.error(e);
       haptics?.error?.();
@@ -74,11 +67,7 @@ export default function ConfirmarDespacho({ pedidoId, onDone }) {
   }
 
   if (loadingData) {
-    return (
-      <button className="btn btn--primary" disabled style={{ width: "100%", opacity: 0.6 }}>
-        Cargando…
-      </button>
-    );
+    return <button className="btn btn--primary" disabled style={{ width: "100%", opacity: 0.6 }}>Cargando…</button>;
   }
 
   const esAgencia = pedido?.metodoEntrega === "AGENCIA";
@@ -87,96 +76,100 @@ export default function ConfirmarDespacho({ pedidoId, onDone }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
 
-      {/* Selector de agencia — solo para pedidos de tipo AGENCIA */}
+      {/* ── Confirmación de agencia ── */}
       {esAgencia && (
         <div style={{
-          background: "#f8fafc",
-          border: "1.5px solid #e2e8f0",
-          borderRadius: "10px",
-          padding: "12px 14px",
+          background: "#f8fafc", border: "1.5px solid #e2e8f0",
+          borderRadius: "10px", padding: "12px 14px",
         }}>
-          <div style={{
-            fontSize: "11px", fontWeight: 700, color: "#64748b",
-            textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "10px",
-          }}>
-            🚌 Confirmar agencia de envío
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
+            🚌 Agencia de envío
           </div>
 
-          {/* Grilla de agencias */}
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "6px",
-          }}>
-            {AGENCIAS.map(ag => (
+          {agencia ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{
+                fontSize: "15px", fontWeight: 700, color: "#1d4ed8",
+                background: "#eff6ff", border: "1.5px solid #bfdbfe",
+                borderRadius: "8px", padding: "8px 16px",
+              }}>
+                {agencia}
+              </span>
               <button
-                key={ag.nombre}
-                onClick={() => setAgencia(ag.nombre)}
-                style={{
-                  padding: "7px 4px",
-                  fontSize: "11px",
-                  fontWeight: agencia === ag.nombre ? 700 : 500,
-                  border: "1.5px solid",
-                  borderColor: agencia === ag.nombre ? "#2563eb" : "#e2e8f0",
-                  borderRadius: "7px",
-                  background: agencia === ag.nombre ? "#eff6ff" : "#fff",
-                  color: agencia === ag.nombre ? "#1d4ed8" : "#475569",
-                  cursor: "pointer",
-                  transition: "all 0.12s",
-                  lineHeight: 1.2,
-                }}
+                onClick={() => setShowSelector(true)}
+                style={{ fontSize: "12px", color: "#64748b", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: "4px 8px" }}
               >
-                {ag.nombre}
+                Cambiar
               </button>
-            ))}
-          </div>
-
-          {agencia && (
-            <p style={{
-              margin: "10px 0 0",
-              fontSize: "12px",
-              fontWeight: 600,
-              color: "#166534",
-              background: "#f0fdf4",
-              border: "1px solid #bbf7d0",
-              borderRadius: "6px",
-              padding: "6px 10px",
-            }}>
-              ✓ Agencia seleccionada: <strong>{agencia}</strong>
-            </p>
-          )}
-
-          {!agencia && (
-            <p style={{ margin: "8px 0 0", fontSize: "12px", color: "#b45309" }}>
-              ⚠️ Seleccioná la agencia para poder despachar.
-            </p>
+            </div>
+          ) : (
+            <div>
+              <p style={{ margin: "0 0 8px", fontSize: "13px", color: "#b45309" }}>
+                ⚠️ No se detectó la agencia automáticamente. Seleccioná una para continuar.
+              </p>
+              <button onClick={() => setShowSelector(true)} className="btn btn--ghost" style={{ width: "100%" }}>
+                Seleccionar agencia
+              </button>
+            </div>
           )}
         </div>
       )}
 
-      {/* Botón despachar */}
+      {/* ── Botón despachar ── */}
       <button
         onClick={onDespachar}
         disabled={loading || !puedeDespachar}
         style={{
-          width: "100%",
-          padding: "14px",
-          fontSize: "15px",
-          fontWeight: 700,
-          borderRadius: "10px",
-          border: "none",
+          width: "100%", padding: "14px", fontSize: "15px", fontWeight: 700,
+          borderRadius: "10px", border: "none",
           background: puedeDespachar ? "#0f172a" : "#cbd5e1",
-          color: "#fff",
-          cursor: puedeDespachar ? "pointer" : "not-allowed",
-          transition: "background 0.15s",
+          color: "#fff", cursor: puedeDespachar ? "pointer" : "not-allowed",
         }}
       >
-        {loading
-          ? "Despachando…"
-          : esAgencia && agencia
-            ? `Despachar vía ${agencia}`
-            : "Despachar"}
+        {loading ? "Despachando…" : esAgencia && agencia ? `Despachar vía ${agencia}` : "Despachar"}
       </button>
+
+      {/* ── Modal selector de agencia (bottom-sheet) ── */}
+      {showSelector && (
+        <div
+          onClick={() => setShowSelector(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "flex-end" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: "#fff", width: "100%", borderRadius: "16px 16px 0 0",
+              padding: "20px", maxHeight: "70vh", overflowY: "auto",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700 }}>Seleccionar agencia</h3>
+              <button onClick={() => setShowSelector(false)} style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: "#94a3b8", lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              {AGENCIAS.map(ag => (
+                <button
+                  key={ag.nombre}
+                  onClick={() => { setAgencia(ag.nombre); setShowSelector(false); }}
+                  style={{
+                    padding: "12px 8px", fontSize: "13px",
+                    fontWeight: agencia === ag.nombre ? 700 : 500,
+                    border: "1.5px solid",
+                    borderColor: agencia === ag.nombre ? "#2563eb" : "#e2e8f0",
+                    borderRadius: "8px",
+                    background: agencia === ag.nombre ? "#eff6ff" : "#fff",
+                    color: agencia === ag.nombre ? "#1d4ed8" : "#334155",
+                    cursor: "pointer", textAlign: "left",
+                  }}
+                >
+                  <span style={{ fontSize: "11px", color: "#94a3b8", display: "block" }}>{ag.orden}.</span>
+                  {ag.nombre}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
