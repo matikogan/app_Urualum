@@ -531,3 +531,110 @@ exports.sincronizarEstadoDeposito = onDocumentUpdated(
     }
   }
 );
+// ============================================================================
+// NOTIFICACIONES ENCARGADO: Nuevo pedido, cambio de estado, modificación datos
+// ============================================================================
+
+// Helper: obtener tokens de todos los encargados de un depósito
+async function getTokensEncargados(deposito) {
+  const snap = await db.collection("users")
+    .where("rol", "==", "encargado")
+    .where("deposito", "==", deposito)
+    .get();
+  const tokens = [];
+  snap.forEach(d => { if (d.data().fcmToken) tokens.push(d.data().fcmToken); });
+  return tokens;
+}
+
+// 1) Nuevo pedido creado → notificar encargados del depósito
+exports.notificarNuevoPedido = onDocumentCreated(
+  "pedidos/{id}",
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+    if (data.esCotizacion || data.deposito === "COTIZACION") return;
+    if (!data.deposito) return;
+
+    const tokens = await getTokensEncargados(data.deposito);
+    if (!tokens.length) return;
+
+    const numero = data.numero || event.params.id;
+    await sendPushNotification(tokens, {
+      title: "📦 Nuevo pedido",
+      body: `${numero} — ${data.cliente || "Sin cliente"} (${data.metodoEntrega || "—"})`,
+      click_action: `https://app.urualum.uy/pedidos/${event.params.id}`,
+    });
+    logger.info(`Notificado nuevo pedido ${numero} a encargados de ${data.deposito}`);
+  }
+);
+
+// 2) Cambio de estado → notificar encargados (excepto PREPARADO y ASIGNADO, ya cubiertos)
+exports.notificarCambioEstado = onDocumentUpdated(
+  "pedidos/{id}",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const before = snap.before.data();
+    const after  = snap.after.data();
+
+    if (before.estado === after.estado) return;
+    // PREPARADO y ASIGNADO ya tienen su propia CF
+    if (["PREPARADO", "ASIGNADO"].includes(after.estado)) return;
+    if (!after.deposito) return;
+
+    const tokens = await getTokensEncargados(after.deposito);
+    if (!tokens.length) return;
+
+    const numero = after.numero || event.params.id;
+    const estadoLabel = {
+      PENDIENTE_ASIGNAR: "Pendiente de asignar",
+      EN_PREPARACION:    "En preparación",
+      CONTROLADO:        "Controlado",
+      DESPACHADO:        "Despachado",
+      ANULADO:           "Anulado",
+    }[after.estado] || after.estado;
+
+    await sendPushNotification(tokens, {
+      title: `📋 ${estadoLabel}`,
+      body: `Pedido ${numero} pasó a ${estadoLabel}`,
+      click_action: `https://app.urualum.uy/pedidos/${event.params.id}`,
+    });
+  }
+);
+
+// 3) Modificación de datos relevantes → notificar encargados
+exports.notificarModificacionPedido = onDocumentUpdated(
+  "pedidos/{id}",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const before = snap.before.data();
+    const after  = snap.after.data();
+
+    if (!after.deposito) return;
+
+    // Detectar cambios en campos relevantes
+    const clienteCambio      = before.cliente      !== after.cliente;
+    const metodoCambio       = before.metodoEntrega !== after.metodoEntrega;
+    const productosCambio    = JSON.stringify(before.productos || []) !== JSON.stringify(after.productos || []);
+
+    if (!clienteCambio && !metodoCambio && !productosCambio) return;
+
+    const tokens = await getTokensEncargados(after.deposito);
+    if (!tokens.length) return;
+
+    const numero = after.numero || event.params.id;
+    const cambios = [
+      clienteCambio   && "cliente",
+      metodoCambio    && "método de entrega",
+      productosCambio && "productos/cantidades",
+    ].filter(Boolean).join(", ");
+
+    await sendPushNotification(tokens, {
+      title: "✏️ Pedido modificado",
+      body: `${numero}: cambió ${cambios}`,
+      click_action: `https://app.urualum.uy/pedidos/${event.params.id}`,
+    });
+    logger.info(`Notificada modificación en pedido ${numero}: ${cambios}`);
+  }
+);
