@@ -20,6 +20,7 @@ import Pedidos from "modules/pedidos/pages/pedidos";
 import PedidoDetalle from "modules/pedidos/pages/pedidoDetalle";
 import ConfirmarDespacho from "modules/pedidos/pages/confirmarDespacho";
 import Despacho from "modules/pedidos/pages/despacho";
+import ControlCarga from "modules/pedidos/pages/ControlCarga";
 
 // Pedidos (Operario)
 import PedidosAsignadosOperario from "modules/pedidos/components/PedidosAsignadosOperario";
@@ -169,6 +170,7 @@ export default function App() {
 
             {/* Errores */}
             <Route path="/encargado/errores" element={<ErroresPreparacionPage />} />
+            <Route path="/encargado/control-carga" element={<ControlCarga />} />
             <Route path="/errores/nuevo" element={<ErrorCarga />} />
             <Route path="/actitud/nuevo" element={<ActitudCarga />} />
             <Route path="/reporte/semanal" element={<ReporteSemanal />} />

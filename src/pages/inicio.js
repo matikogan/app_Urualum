@@ -282,6 +282,16 @@ export default function Inicio() {
             {isEncargadoOOperario ? "Gestión de Pedidos" : "Preparación de Pedidos"}
           </button>
 
+          {profile?.rol === "encargado" && (
+            <button
+              className="btn btn--outline btn-big-adaptive btn--elevated"
+              onClick={() => navigate("/encargado/control-carga")}
+            >
+              <span className="btn-icon">🚛</span>
+              Control de Carga
+            </button>
+          )}
+
           {isAdmin && (
             <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
                 <button
