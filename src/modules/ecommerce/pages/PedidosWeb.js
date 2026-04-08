@@ -314,25 +314,21 @@ export default function PedidosWeb() {
             </button>
           </div>
 
-          {/* Tabla — V2: widths definidos, V6: sin botón "Gestionar", V8: headers ordenables */}
+          {/* Lista de pedidos — layout compacto para columna estrecha */}
           <div className="card table-wrap" style={{ padding: 0, overflow: "hidden" }}>
-            <table className="table">
+            <table className="table" style={{ tableLayout: "fixed", width: "100%" }}>
               <colgroup>
-                <col style={{ width: "22%" }} /> {/* ID */}
-                <col style={{ width: "32%" }} /> {/* Cliente */}
-                <col style={{ width: "16%" }} /> {/* Fecha */}
-                <col style={{ width: "13%" }} /> {/* Total */}
-                <col style={{ width: "17%" }} /> {/* Estado */}
+                <col style={{ width: "34%" }} /> {/* ID + depósito */}
+                <col style={{ width: "26%" }} /> {/* Cliente */}
+                <col style={{ width: "22%" }} /> {/* Fecha + hora */}
+                <col style={{ width: "18%" }} /> {/* Estado */}
               </colgroup>
               <thead>
                 <tr>
-                  <th>ID</th>
+                  <th>Pedido</th>
                   <th>Cliente</th>
                   <th className="th-sort" onClick={() => toggleSort("fecha")}>
                     Fecha <SortArrow col="fecha" sortCol={sortCol} sortDir={sortDir} />
-                  </th>
-                  <th className="th-sort" onClick={() => toggleSort("total")}>
-                    Total <SortArrow col="total" sortCol={sortCol} sortDir={sortDir} />
                   </th>
                   <th className="th-sort" onClick={() => toggleSort("estado")}>
                     Estado <SortArrow col="estado" sortCol={sortCol} sortDir={sortDir} />
@@ -342,8 +338,7 @@ export default function PedidosWeb() {
               <tbody>
                 {pedidosFiltrados.length === 0 ? (
                   <tr>
-                    <td colSpan={5}>
-                      {/* V7: Empty state */}
+                    <td colSpan={4}>
                       <div style={{ textAlign: "center", padding: "48px 20px", color: "#94a3b8" }}>
                         <div style={{ fontSize: "40px", marginBottom: "12px" }}>✅</div>
                         <strong style={{ color: "#334155", display: "block", marginBottom: "4px", fontSize: "15px" }}>
@@ -364,15 +359,28 @@ export default function PedidosWeb() {
                       style={{ cursor: "pointer" }}
                       title="Clic para gestionar"
                     >
-                      <td style={{ fontWeight: 700, fontSize: "13px", whiteSpace: "nowrap" }}>{p.finnegansId}</td>
-                      <td style={{ fontSize: "13px" }}>{p.clienteNombre}</td>
-                      <td style={{ fontSize: "13px", color: "#64748b", whiteSpace: "nowrap" }}>
+                      <td style={{ overflow: "hidden" }}>
+                        <div style={{ fontWeight: 700, fontSize: "12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {p.finnegansId}
+                        </div>
+                        <div style={{ marginTop: "2px" }}>
+                          <span style={{
+                            fontSize: "10px", fontWeight: 600, padding: "1px 5px",
+                            borderRadius: "4px", background: "#e0f2fe", color: "#0369a1",
+                          }}>
+                            {p.depositoAsignado || "—"}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.clienteNombre}
+                      </td>
+                      <td style={{ fontSize: "11px", color: "#64748b", whiteSpace: "nowrap" }}>
                         <div>{p.fecha?.toDate().toLocaleDateString("es-UY", { day: "2-digit", month: "short" })}</div>
-                        <div style={{ fontSize: "11px", color: "#94a3b8" }}>
+                        <div style={{ color: "#94a3b8" }}>
                           {p.fecha?.toDate().toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" })}
                         </div>
                       </td>
-                      <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>${p.total?.toFixed(0)}</td>
                       <td style={{ whiteSpace: "nowrap" }}><EstadoPill estado={p.estado} /></td>
                     </tr>
                   ))
@@ -419,7 +427,7 @@ export default function PedidosWeb() {
                     </button>
                   </div>
                 </div>
-                <div className="meta" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginBottom: "8px" }}>
+                <div className="meta" style={{ marginBottom: "8px" }}>
                   <div className="meta-item">
                     <span className="meta-label">Cliente</span>
                     <span className="meta-value">{pedidoSeleccionado.clienteNombre}</span>
@@ -533,64 +541,71 @@ export default function PedidosWeb() {
                 {/* Tabla de stock */}
                 <div className="card--preparacion">
                   <h3 className="card-header" style={{ marginTop: 0 }}>Líneas del pedido y stock real</h3>
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="table table-gestion">
-                      <thead>
-                        <tr>
-                          <th>Producto</th>
-                          <th style={{ textAlign: "center" }}>Cant.</th>
-                          <th style={{ textAlign: "center" }}>R8</th>
-                          <th style={{ textAlign: "center" }}>ISA</th>
-                          <th style={{ textAlign: "center" }}>Estado</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pedidoSeleccionado.items.map((item, i) => {
-                          const stock = stockPorProducto[item.codigo];
-                          const stockRelevante = getStockRelevante(item.codigo);
-                          const faltaStock = !loadingStock && stock && stockRelevante < item.cantidad;
-                          const depEfectivo = pedidoSeleccionado.estado === "NUEVO"
-                            ? (depositoPrep || pedidoSeleccionado.depositoAsignado)
-                            : pedidoSeleccionado.depositoAsignado;
-                          const esDepIsa = depEfectivo === "ISABELA";
-                          return (
-                            <tr key={i}>
-                              <td>
-                                <div style={{ fontWeight: 700, fontSize: "13px" }}>
-                                  {loadingStock ? item.descripcion : (stock?.nombreFinnegans || item.descripcion)}
-                                </div>
-                                <small style={{ color: "#94a3b8" }}>SKU: {item.codigo}</small>
-                              </td>
-                              <td style={{ textAlign: "center", fontWeight: 800, fontSize: "1.1rem" }}>
-                                {item.cantidad}
-                              </td>
-                              <td style={{
-                                textAlign: "center",
-                                color: !esDepIsa && faltaStock ? "var(--error)" : "inherit",
-                                fontWeight: !esDepIsa && faltaStock ? 800 : 400,
-                              }}>
-                                {loadingStock ? "…" : (stock?.r8 ?? "…")}
-                              </td>
-                              <td style={{
-                                textAlign: "center",
-                                color: esDepIsa && faltaStock ? "var(--error)" : "inherit",
-                                fontWeight: esDepIsa && faltaStock ? 800 : 400,
-                              }}>
-                                {loadingStock ? "…" : (stock?.isa ?? "…")}
-                              </td>
-                              <td style={{ textAlign: "center" }}>
-                                {!loadingStock && stock ? (
-                                  faltaStock
-                                    ? <span className="pill pill--error" style={{ fontSize: "11px", padding: "3px 7px" }}>INSUF.</span>
-                                    : <span className="pill pill--ok" style={{ fontSize: "11px", padding: "3px 7px" }}>OK</span>
-                                ) : <span style={{ color: "#94a3b8" }}>…</span>}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <table className="table table-gestion pedidosweb-stock-table">
+                    <colgroup>
+                      <col className="col-producto" />
+                      <col className="col-cant" />
+                      <col className="col-dep" /> {/* R8 */}
+                      <col className="col-dep" /> {/* ISA */}
+                      <col className="col-estado" />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Producto</th>
+                        <th style={{ textAlign: "center" }}>Cant.</th>
+                        <th style={{ textAlign: "center" }}>R8</th>
+                        <th style={{ textAlign: "center" }}>ISA</th>
+                        <th style={{ textAlign: "center" }}>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pedidoSeleccionado.items.map((item, i) => {
+                        const stock = stockPorProducto[item.codigo];
+                        const stockRelevante = getStockRelevante(item.codigo);
+                        const faltaStock = !loadingStock && stock && stockRelevante < item.cantidad;
+                        const depEfectivo = pedidoSeleccionado.estado === "NUEVO"
+                          ? (depositoPrep || pedidoSeleccionado.depositoAsignado)
+                          : pedidoSeleccionado.depositoAsignado;
+                        const esDepIsa = depEfectivo === "ISABELA";
+                        return (
+                          <tr key={i}>
+                            <td title={stock?.nombreFinnegans || item.descripcion}>
+                              <div style={{ fontWeight: 700, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {loadingStock ? item.descripcion : (stock?.nombreFinnegans || item.descripcion)}
+                              </div>
+                              <small style={{ color: "#94a3b8" }}>{item.codigo}</small>
+                            </td>
+                            <td style={{ textAlign: "center", fontWeight: 800, fontSize: "1rem" }}>
+                              {item.cantidad}
+                            </td>
+                            <td style={{
+                              textAlign: "center",
+                              color: !esDepIsa && faltaStock ? "var(--error)" : "inherit",
+                              fontWeight: !esDepIsa && faltaStock ? 800 : 400,
+                              background: !esDepIsa ? "#f0f9ff" : "transparent",
+                            }}>
+                              {loadingStock ? "…" : (stock?.r8 ?? "…")}
+                            </td>
+                            <td style={{
+                              textAlign: "center",
+                              color: esDepIsa && faltaStock ? "var(--error)" : "inherit",
+                              fontWeight: esDepIsa && faltaStock ? 800 : 400,
+                              background: esDepIsa ? "#f0f9ff" : "transparent",
+                            }}>
+                              {loadingStock ? "…" : (stock?.isa ?? "…")}
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              {!loadingStock && stock ? (
+                                faltaStock
+                                  ? <span className="pill pill--error" style={{ fontSize: "11px", padding: "3px 7px" }}>INSUF.</span>
+                                  : <span className="pill pill--ok" style={{ fontSize: "11px", padding: "3px 7px" }}>OK</span>
+                              ) : <span style={{ color: "#94a3b8" }}>…</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
