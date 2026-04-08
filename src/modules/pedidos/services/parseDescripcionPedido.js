@@ -1,5 +1,40 @@
 export const METODOS = ["AGENCIA", "RETIRA", "CAMION", "GIRA"];
 
+/** Lista canónica de agencias en el orden de carga al camión */
+export const AGENCIAS = [
+  { nombre: "EL CALABRES", orden: 1,  alias: ["EL CALABRES", "CALABRES"] },
+  { nombre: "VENEZUELA",   orden: 2,  alias: ["VENEZUELA"] },
+  { nombre: "ASTRANS",     orden: 3,  alias: ["ASTRANS"] },
+  { nombre: "ECHENIQUE",   orden: 4,  alias: ["ECHENIQUE"] },
+  { nombre: "ARIEL",       orden: 5,  alias: ["ARIEL"] },
+  { nombre: "BERRO",       orden: 6,  alias: ["BERRO"] },
+  { nombre: "ACC",         orden: 7,  alias: ["ACC"] },
+  { nombre: "TRUJILLO",    orden: 8,  alias: ["TRUJILLO"] },
+  { nombre: "TAMER",       orden: 9,  alias: ["TAMER"] },
+  { nombre: "CUAREIM",     orden: 10, alias: ["CUAREIM"] },
+  { nombre: "YI",          orden: 11, alias: ["\\bYI\\b"] },
+  { nombre: "REPUBLICA",   orden: 12, alias: ["REPUBLICA"] },
+  { nombre: "EL NORTEÑO",  orden: 13, alias: ["EL NORTENO", "NORTENO"] },
+  { nombre: "TURIL",       orden: 14, alias: ["TURIL"] },
+  { nombre: "NORESTE",     orden: 15, alias: ["NORESTE"] },
+];
+
+/** Intenta detectar la agencia a partir del texto normalizado (sin acentos, en mayúsculas) */
+export function detectarAgencia(norm = "") {
+  // Intentar primero en el texto que sigue después de "AGENCIA"
+  const afterKeyword = norm.match(/AGENCIA\s+(.*)/);
+  const searchIn = afterKeyword ? afterKeyword[1] : norm;
+
+  for (const ag of AGENCIAS) {
+    for (const alias of ag.alias) {
+      // Soporta regex escapado (ej: \bYI\b) o texto plano
+      const re = alias.startsWith("\\") ? new RegExp(alias) : new RegExp(`\\b${alias}\\b`);
+      if (re.test(searchIn)) return ag.nombre;
+    }
+  }
+  return null;
+}
+
 /**
  * Parsea la descripción de Finnegans y devuelve { deposito, metodoEntrega, raw, esCotizacion }.
  * - Soporta formatos “R8 - CAMION”, “ISABELA-CAMION”, “ISA - GIRA”,
@@ -26,6 +61,7 @@ export function parseDescripcionPedido(descRaw = "") {
 
   let deposito = null;
   let metodoEntrega = null;
+  let agencia = null;
 
   // 1) Intento de formato "DEP - METODO"
   const parts = norm.split(" - ");
@@ -66,9 +102,15 @@ export function parseDescripcionPedido(descRaw = "") {
   // 5) Sanitizar salida
   if (metodoEntrega && !METODOS.includes(metodoEntrega)) metodoEntrega = null;
 
+  // 6) Detectar agencia si el método es AGENCIA
+  if (metodoEntrega === "AGENCIA") {
+    agencia = detectarAgencia(norm);
+  }
+
   return {
     deposito: deposito || null,
     metodoEntrega: metodoEntrega || null,
+    agencia: agencia || null,
     raw: descRaw,
     esCotizacion,
   };

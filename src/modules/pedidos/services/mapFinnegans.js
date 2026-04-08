@@ -131,6 +131,7 @@ export function mapFinDocToPedido(fin) {
   const {
     deposito: depParsed,
     metodoEntrega: metParsed,
+    agencia: agenciaParsed,
     esCotizacion,
   } = parseDescripcionPedido(descripcion);
 
@@ -150,6 +151,7 @@ export function mapFinDocToPedido(fin) {
       descripcion,
       deposito: esCotizacion ? "COTIZACION" : (depParsed || null),
       metodoEntrega: metParsed || null,
+      agencia: agenciaParsed || null,
       productos,
       source: "finnegans",
       finFecha: finFecha || null,
