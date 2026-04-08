@@ -2756,6 +2756,14 @@ select.w-full.border.rounded {
 .bg-ok   { background: var(--ok) !important; }
 .bg-warn { background: #f59e0b !important; }
 
+/* Wrapper de página full-width para Pedidos Web */
+.pedidosweb-page {
+  padding: var(--space-4);
+  padding-bottom: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* Layout split — lista izquierda, panel derecha */
 .pedidosweb-layout {
   display: grid;
@@ -2764,18 +2772,19 @@ select.w-full.border.rounded {
 }
 @media (min-width: 768px) {
   .pedidosweb-layout {
-    grid-template-columns: minmax(320px, 36%) 1fr;
-    height: calc(100vh - 134px);
+    /* Lista fija ~380px, panel toma el resto del espacio disponible */
+    grid-template-columns: 380px 1fr;
+    height: calc(100vh - 130px);
     overflow: hidden;
     align-items: stretch;
-    gap: 14px;
+    gap: 16px;
   }
   .pedidosweb-left  { overflow-y: auto; }
   .pedidosweb-right { overflow-y: auto; }
 }
-@media (min-width: 1280px) {
+@media (min-width: 1400px) {
   .pedidosweb-layout {
-    grid-template-columns: minmax(340px, 32%) 1fr;
+    grid-template-columns: 420px 1fr;
   }
 }
 

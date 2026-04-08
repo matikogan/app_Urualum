@@ -260,10 +260,10 @@ export default function PedidosWeb() {
     DESPACHADO:        { icon: "📤", label: "Despachado" },
   };
 
-  if (loading) return <div className="container screen-center">⏳ Cargando buzón...</div>;
+  if (loading) return <div className="pedidosweb-page screen-center">⏳ Cargando buzón...</div>;
 
   return (
-    <div className="container" style={{ paddingBottom: 0 }}>
+    <div className="pedidosweb-page">
 
       {/* Toast de feedback */}
       {toastMsg && (
@@ -314,14 +314,14 @@ export default function PedidosWeb() {
             </button>
           </div>
 
-          {/* Lista de pedidos — layout compacto para columna estrecha */}
+          {/* Lista de pedidos */}
           <div className="card table-wrap" style={{ padding: 0, overflow: "hidden" }}>
             <table className="table" style={{ tableLayout: "fixed", width: "100%" }}>
               <colgroup>
-                <col style={{ width: "34%" }} /> {/* ID + depósito */}
-                <col style={{ width: "26%" }} /> {/* Cliente */}
-                <col style={{ width: "22%" }} /> {/* Fecha + hora */}
-                <col style={{ width: "18%" }} /> {/* Estado */}
+                <col style={{ width: "36%" }} /> {/* ID + depósito */}
+                <col style={{ width: "24%" }} /> {/* Cliente */}
+                <col style={{ width: "20%" }} /> {/* Fecha + hora */}
+                <col style={{ width: "20%" }} /> {/* Estado */}
               </colgroup>
               <thead>
                 <tr>
@@ -359,13 +359,13 @@ export default function PedidosWeb() {
                       style={{ cursor: "pointer" }}
                       title="Clic para gestionar"
                     >
-                      <td style={{ overflow: "hidden" }}>
-                        <div style={{ fontWeight: 700, fontSize: "12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <td>
+                        <div style={{ fontWeight: 700, fontSize: "12px", whiteSpace: "nowrap" }}>
                           {p.finnegansId}
                         </div>
                         <div style={{ marginTop: "2px" }}>
                           <span style={{
-                            fontSize: "10px", fontWeight: 600, padding: "1px 5px",
+                            fontSize: "10px", fontWeight: 600, padding: "1px 6px",
                             borderRadius: "4px", background: "#e0f2fe", color: "#0369a1",
                           }}>
                             {p.depositoAsignado || "—"}
