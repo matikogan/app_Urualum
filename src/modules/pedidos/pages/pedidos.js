@@ -540,211 +540,385 @@ export default function PedidosPage() {
     markEstadoSeen(estado);
   }
 
-  // Helper: renderiza una sección de estado completa (reutilizado en zonas y vista plana)
-  function renderEstadoSection(estado, porFecha, totalEstado) {
-    const stateClass = `state--${(estado || "").toLowerCase().replaceAll("_", "-")}`;
-    const stateCollapsed = collapsedStates.has(estado);
+
+  // ── Config visual por estado ─────────────────────────────────────────────
+  const ESTADO_CONFIG = {
+    PENDIENTE_ASIGNAR: { label: "Pendiente de asignar",    icon: "🕐", color: "#f59e0b", bg: "#fef3c7", border: "#fde68a" },
+    ASIGNADO:          { label: "Asignado",                icon: "👤", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+    EN_PREPARACION:    { label: "En preparación",          icon: "⚙️", color: "#8b5cf6", bg: "#f5f3ff", border: "#ddd6fe" },
+    PREPARADO:         { label: "Preparado — a controlar", icon: "✅", color: "#16a34a", bg: "#f0fdf4", border: "#86efac" },
+    CONTROLADO:        { label: "Controlado — listo",      icon: "📦", color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
+    DESPACHADO:        { label: "Despachados hoy",         icon: "🚚", color: "#475569", bg: "#f8fafc", border: "#e2e8f0" },
+  };
+
+  // ── Urgencia según fecha del pedido ──────────────────────────────────────
+  function getUrgencia(p) {
+    const d = getPedidoDate(p);
+    if (!d) return null;
+    const diff = daysDiff(new Date(), d);
+    if (diff > 0) return "vencido";
+    if (diff === 0) return "hoy";
+    return null;
+  }
+
+  function formatFechaCorta(p) {
+    const d = getPedidoDate(p);
+    if (!d) return null;
+    return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
+  }
+
+  // ── Card de pedido rediseñada ─────────────────────────────────────────────
+  function renderCard(p) {
+    const urgencia = getUrgencia(p);
+    const responsable = getResponsable(p);
+    const timeAgo = formatTimeAgo(p.timestamps?.[p.estado]);
+    const fechaCorta = formatFechaCorta(p);
+    const itemCount = p.productos?.length ?? 0;
+    const urgenciaColor = urgencia === "vencido" ? "#ef4444" : urgencia === "hoy" ? "#f59e0b" : null;
+
+    const metodoColors = {
+      AGENCIA: { bg: "#eff6ff", color: "#1d4ed8" },
+      RETIRA:  { bg: "#f0fdf4", color: "#15803d" },
+      CAMION:  { bg: "#fef3c7", color: "#92400e" },
+      GIRA:    { bg: "#fdf4ff", color: "#7e22ce" },
+    };
+    const metodoStyle = metodoColors[p.metodoEntrega] || { bg: "#f8fafc", color: "#475569" };
+
     return (
-      <section key={estado} className={`section section--state ${stateClass}`}>
-        <div
-          className="section-title section-title--state"
-          onClick={() => { toggleEstado(estado); clearStateBadge(estado); }}
-          style={{ cursor: "pointer" }}
-        >
-          <Badge count={badges.states?.[estado] || 0} />
-          <span className="state-label">{estado}</span>
-          {estado === "DESPACHADO" && despachosHasNew && (
-            <span style={{ display:"inline-block", width:10, height:10, backgroundColor:"red", borderRadius:"50%", marginLeft:6 }} />
+      <a
+        key={p.id}
+        href={`/pedidos/${encodeURIComponent(p.id)}`}
+        style={{
+          display: "block",
+          textDecoration: "none",
+          background: "#fff",
+          borderRadius: "12px",
+          border: "1px solid #e2e8f0",
+          borderLeft: urgenciaColor ? `4px solid ${urgenciaColor}` : "1px solid #e2e8f0",
+          padding: "11px 14px",
+          marginBottom: "7px",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+          WebkitTapHighlightColor: "transparent",
+          transition: "box-shadow 0.12s ease",
+        }}
+      >
+        {/* Fila 1: número + método + urgencia o tiempo */}
+        <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "4px" }}>
+          <span style={{ fontWeight: 700, fontSize: "0.87rem", color: "#0f172a", letterSpacing: "0.01em" }}>
+            #{p.numero || p.id}
+          </span>
+          {p.metodoEntrega && (
+            <span style={{
+              fontSize: "0.63rem", fontWeight: 700, padding: "2px 7px",
+              borderRadius: "999px", letterSpacing: "0.05em",
+              background: metodoStyle.bg, color: metodoStyle.color,
+              flexShrink: 0,
+            }}>
+              {p.metodoEntrega}
+            </span>
           )}
-          <span className="state-count">{totalEstado}</span>
-          <span className="chev chev--sm" style={{ display:"inline-block", transform: stateCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition:"transform .15s ease-in-out", marginLeft:8 }}>⌄</span>
+          {urgencia ? (
+            <span style={{
+              marginLeft: "auto", flexShrink: 0,
+              fontSize: "0.63rem", fontWeight: 700, padding: "2px 7px",
+              borderRadius: "999px", letterSpacing: "0.04em",
+              background: urgencia === "vencido" ? "#fef2f2" : "#fefce8",
+              color: urgenciaColor,
+            }}>
+              {urgencia === "vencido" ? "⚠ Vencido" : "⏰ Vence hoy"}
+            </span>
+          ) : timeAgo ? (
+            <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "#94a3b8", fontWeight: 500, flexShrink: 0 }}>
+              ⏱ {timeAgo}
+            </span>
+          ) : null}
         </div>
 
-        {!stateCollapsed && (
-          <div className="section-children">
-            {Object.entries(porFecha).map(([bucket, items]) => {
-              const key = `${estado}::${bucket}`;
-              const collapsed = collapsedBuckets.has(key);
-              return (
-                <div key={bucket} className="subsection">
-                  <div className="subsection-title" onClick={() => { toggleBucket(estado, bucket); clearBucketBadge(estado, bucket); }} style={{ cursor:"pointer" }}>
-                    <span>{bucket}</span>
-                    <span className="muted">{items.length}</span>
-                    <span className="chev chev--sm" style={{ display:"inline-block", transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)", transition:"transform .15s ease-in-out" }}>⌄</span>
-                  </div>
-                  {!collapsed && (
-                    <div className="subsection-body">
-                      <div className="orders-grid">
-                        {items.map((p) => (
-                          <a key={p.id} href={`/pedidos/${encodeURIComponent(p.id)}`} className="card order-card card--selectable">
-                            <div className="order-head">
-                              <div className="order-number">#{p.numero || p.id}</div>
-                              {getResponsable(p) && (
-                                <span className="pill pill--user" title="Responsable asignado">{getResponsable(p)}</span>
-                              )}
-                              <span className="pill pill--info">{p.metodoEntrega || "—"}</span>
-                              {formatTimeAgo(p.timestamps?.[p.estado]) && (
-                                <span className="pill pill--muted" title={`En estado ${p.estado} desde hace este tiempo`}>
-                                  ⏱ {formatTimeAgo(p.timestamps?.[p.estado])}
-                                </span>
-                              )}
-                            </div>
-                            <div className="order-body">
-                              <div className="order-field">
-                                <span className="order-label">Fecha (Finnegans)</span>
-                                <span className="order-value">{p.finFecha || "—"}</span>
-                              </div>
-                              <div className="order-field">
-                                <span className="order-label">Cliente</span>
-                                <span className="order-value">{p.cliente || "—"}</span>
-                              </div>
-                              <div className="order-field">
-                                <span className="order-label">Depósito</span>
-                                <span className="order-value">{p.deposito || "—"}</span>
-                              </div>
-                              {getResponsable(p) && (
-                                <div className="order-field">
-                                  <span className="order-label">Responsable</span>
-                                  <span className="order-value">{getResponsable(p)}</span>
-                                </div>
-                              )}
-                              <div className="order-field">
-                                <span className="order-label">Ítems</span>
-                                <span className="order-value">{p.productos?.length ?? 0}</span>
-                              </div>
-                              {p.bultos != null && (
-                                <div className="order-field">
-                                  <span className="order-label">Bultos</span>
-                                  <span className="order-value">{p.bultos}</span>
-                                </div>
-                              )}
-                              {p.paquetes != null && (
-                                <div className="order-field">
-                                  <span className="order-label">Paquetes</span>
-                                  <span className="order-value">{p.paquetes}</span>
-                                </div>
-                              )}
-                            </div>
-                          </a>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
+        {/* Fila 2: cliente */}
+        <p style={{
+          margin: "0 0 5px",
+          fontSize: "0.93rem", fontWeight: 600, color: "#1e293b",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          {p.cliente || "—"}
+        </p>
+
+        {/* Fila 3: ítems + fecha + responsable */}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <span style={{ fontSize: "0.76rem", color: "#64748b" }}>
+            {itemCount} ítem{itemCount !== 1 ? "s" : ""}
+          </span>
+          {fechaCorta && (
+            <>
+              <span style={{ fontSize: "0.7rem", color: "#cbd5e1" }}>·</span>
+              <span style={{ fontSize: "0.76rem", color: urgenciaColor || "#64748b" }}>
+                📅 {fechaCorta}
+              </span>
+            </>
+          )}
+          {responsable && (
+            <>
+              <span style={{ fontSize: "0.7rem", color: "#cbd5e1" }}>·</span>
+              <span style={{
+                fontSize: "0.76rem", color: "#64748b",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "130px",
+              }}>
+                👤 {responsable}
+              </span>
+            </>
+          )}
+          {urgencia && timeAgo && (
+            <>
+              <span style={{ fontSize: "0.7rem", color: "#cbd5e1" }}>·</span>
+              <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>⏱ {timeAgo}</span>
+            </>
+          )}
+        </div>
+      </a>
     );
   }
 
-  return (
-    <div className="container">
-          {/* Acciones arriba del título */}
-      {/* Acciones arriba del título */}
-        {(isEncargado || isVentas) && (
-          <div
-            className="page-actions"
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 8,
-              marginBottom: 8,
-            }}
-          >
-            {/* Botón Errores (solo encargado) */}
-            {isEncargado && (
-              <a
-                href="/encargado/errores"
-                className="btn btn--outline"
-                style={{ fontWeight: 600 }}
-                title="Ver errores de preparación"
-              >
-                Errores
-              </a>
-            )}
+  // ── Sección de estado (sin sub-buckets, lista plana) ─────────────────────
+  function renderEstadoSection(estado, porFecha, totalEstado) {
+    const stateCollapsed = collapsedStates.has(estado);
+    const cfg = ESTADO_CONFIG[estado] || { label: estado, icon: "📋", color: "#64748b", bg: "#f8fafc", border: "#e2e8f0" };
+    const newCount = badges.states?.[estado] || 0;
+    // Aplanar todos los buckets en una lista única ordenada por fecha desc
+    const todosLosItems = BUCKET_ORDER.flatMap(b => porFecha[b] || []);
 
-            {/* NUEVO → Informe Despachos (Encargado y Ventas) */}
-            <a
-              href="/ventas/despachados"
-              className="btn btn--primary"
-              style={{ fontWeight: 600 }}
-              title="Ver informe histórico de despachos"
-            >
-              Informe Despachos
-            </a>
+    return (
+      <div key={estado} style={{ marginBottom: "6px" }}>
+        {/* Header del estado */}
+        <button
+          type="button"
+          onClick={() => { toggleEstado(estado); clearStateBadge(estado); }}
+          style={{
+            width: "100%", display: "flex", alignItems: "center", gap: "10px",
+            padding: "13px 16px",
+            background: stateCollapsed ? "#fff" : cfg.bg,
+            border: `1.5px solid ${stateCollapsed ? "#e2e8f0" : cfg.border}`,
+            borderRadius: stateCollapsed ? "14px" : "14px 14px 0 0",
+            cursor: "pointer", textAlign: "left",
+            transition: "all 0.15s ease",
+          }}
+        >
+          <span style={{ fontSize: "1rem", lineHeight: 1, flexShrink: 0 }}>{cfg.icon}</span>
+          <span style={{ flex: 1, fontWeight: 700, fontSize: "0.88rem", color: cfg.color }}>
+            {cfg.label}
+          </span>
+          {newCount > 0 && (
+            <span style={{
+              background: "#ef4444", color: "#fff",
+              fontSize: "0.63rem", fontWeight: 700,
+              padding: "2px 6px", borderRadius: "999px", flexShrink: 0,
+            }}>
+              +{newCount}
+            </span>
+          )}
+          <span style={{
+            flexShrink: 0,
+            background: cfg.color + "22",
+            color: cfg.color,
+            fontSize: "0.78rem", fontWeight: 700,
+            padding: "2px 9px", borderRadius: "999px",
+          }}>
+            {totalEstado}
+          </span>
+          <span style={{
+            flexShrink: 0, color: cfg.color, fontSize: "0.85rem",
+            transform: stateCollapsed ? "rotate(-90deg)" : "rotate(0deg)",
+            transition: "transform 0.15s ease",
+            display: "inline-block",
+          }}>
+            ▾
+          </span>
+        </button>
+
+        {/* Lista de pedidos */}
+        {!stateCollapsed && (
+          <div style={{
+            background: "#f1f5f9",
+            border: `1.5px solid ${cfg.border}`,
+            borderTop: "none",
+            borderRadius: "0 0 14px 14px",
+            padding: "10px 10px 4px",
+          }}>
+            {todosLosItems.length === 0 ? (
+              <p style={{ textAlign: "center", color: "#94a3b8", fontSize: "0.82rem", padding: "12px 0", margin: 0 }}>
+                Sin pedidos
+              </p>
+            ) : (
+              todosLosItems.map(p => renderCard(p))
+            )}
           </div>
         )}
-      {/* Encabezado */}
-      <div className="deck-head">
-        <div className="deck-title">Pedidos</div>
-        <span className="pill pill--brand">Depósito: {depositoActual || "—"}</span>
       </div>
+    );
+  }
 
-      <div className="mt-2">
+  // ── Render principal ──────────────────────────────────────────────────────
+  return (
+    <div style={{ background: "#f8fafc", minHeight: "100vh" }}>
+
+      {/* ── Header sticky compacto ── */}
+      <div style={{
+        background: "#fff", borderBottom: "1px solid #e2e8f0",
+        padding: "12px 16px 10px",
+        position: "sticky", top: 0, zIndex: 10,
+      }}>
+        {/* Fila 1: título + depósito + acciones secundarias */}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+          <h1 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800, color: "#0f172a", flex: 1 }}>
+            Gestión de pedidos
+          </h1>
+          <span style={{
+            background: "#eff6ff", color: "#1d4ed8",
+            fontSize: "0.72rem", fontWeight: 700,
+            padding: "3px 10px", borderRadius: "999px", flexShrink: 0,
+          }}>
+            {depositoActual || "—"}
+          </span>
+          {(isEncargado || isVentas) && (
+            <div style={{ display: "flex", gap: "6px" }}>
+              {isEncargado && (
+                <a
+                  href="/encargado/errores"
+                  title="Errores de preparación"
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: "34px", height: "34px",
+                    background: "#f8fafc", border: "1px solid #e2e8f0",
+                    borderRadius: "10px", textDecoration: "none", fontSize: "1rem",
+                  }}
+                >
+                  🛑
+                </a>
+              )}
+              <a
+                href="/ventas/despachados"
+                title="Informe de despachos"
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: "34px", height: "34px",
+                  background: "#f8fafc", border: "1px solid #e2e8f0",
+                  borderRadius: "10px", textDecoration: "none", fontSize: "1rem",
+                }}
+              >
+                📋
+              </a>
+            </div>
+          )}
+        </div>
+
+        {/* Fila 2: buscador */}
         <SearchBar
           value={q}
           onChange={setQ}
           onClear={() => setQ("")}
-          placeholder="Buscar por #PEDVTA, cliente, método o descripción…"
+          placeholder="Buscar cliente, #pedido, método…"
         />
-      </div>
-      {/* Filtros por método */}
-      <div className="filters">
-        <div className="filters-row">
-          <div className="methods-grid">
-            {["AGENCIA", "RETIRA", "CAMION", "GIRA"].map((m) => (
+
+        {/* Fila 3: filtros por método — chips con scroll horizontal */}
+        <div style={{
+          display: "flex", gap: "7px",
+          overflowX: "auto", paddingBottom: "2px", marginTop: "10px",
+          scrollbarWidth: "none",
+          msOverflowStyle: "none",
+        }}>
+          {["AGENCIA", "RETIRA", "CAMION", "GIRA"].map((m) => {
+            const active = metodoFiltro === m;
+            const colors = { AGENCIA: "#1d4ed8", RETIRA: "#15803d", CAMION: "#b45309", GIRA: "#7e22ce" };
+            return (
               <button
                 key={m}
-                className={`btn ${metodoFiltro === m ? "btn--primary" : "btn--outline"}`}
-                onClick={() => setMetodoFiltro(metodoFiltro === m ? null : m)}
+                type="button"
+                onClick={() => setMetodoFiltro(active ? null : m)}
+                style={{
+                  flexShrink: 0,
+                  padding: "6px 15px",
+                  borderRadius: "999px",
+                  border: `1.5px solid ${active ? colors[m] : "#e2e8f0"}`,
+                  background: active ? colors[m] : "#fff",
+                  color: active ? "#fff" : "#64748b",
+                  fontSize: "0.78rem", fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "all 0.12s ease",
+                }}
               >
                 {m}
               </button>
-            ))}
-          </div>
+            );
+          })}
+          {metodoFiltro && (
+            <button
+              type="button"
+              onClick={() => setMetodoFiltro(null)}
+              style={{
+                flexShrink: 0, padding: "6px 12px", borderRadius: "999px",
+                border: "1.5px solid #fca5a5", background: "#fef2f2",
+                color: "#dc2626", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer",
+              }}
+            >
+              ✕ Limpiar
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Loaders / vacío */}
-      {loadingPedidos && (
-        <div className="card card--compact empty-card">
-          <div className="muted">Cargando pedidos…</div>
-        </div>
-      )}
-      {!loadingPedidos && Object.keys(grupos).length === 0 && (
-        <div className="card card--compact empty-card">
-          <div className="muted">No hay pedidos para mostrar.</div>
-        </div>
-      )}
+      {/* ── Contenido ── */}
+      <div style={{ padding: "10px 10px 80px" }}>
 
-      {/* Encargado: zonas operativas */}
-      {!loadingPedidos && isEncargado && zonasEncargado && (
-        <>
-          {zonasEncargado.accion.length > 0 && (
-            <div className="zona-header zona-header--accion">
-              ⚡ Requiere tu acción
-              <span className="zona-count">{zonasEncargado.accion.reduce((s, [,,t]) => s + t, 0)}</span>
-            </div>
-          )}
-          {zonasEncargado.accion.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
+        {loadingPedidos && (
+          <div style={{ textAlign: "center", padding: "48px 0", color: "#94a3b8", fontSize: "0.9rem" }}>
+            Cargando pedidos…
+          </div>
+        )}
 
-          {zonasEncargado.ejecucion.length > 0 && (
-            <div className="zona-header zona-header--ejecucion">
-              ⚙️ En ejecución
-              <span className="zona-count">{zonasEncargado.ejecucion.reduce((s, [,,t]) => s + t, 0)}</span>
-            </div>
-          )}
-          {zonasEncargado.ejecucion.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
+        {!loadingPedidos && Object.keys(grupos).length === 0 && (
+          <div style={{ textAlign: "center", padding: "48px 16px" }}>
+            <p style={{ color: "#94a3b8", fontSize: "0.9rem", margin: 0 }}>No hay pedidos para mostrar.</p>
+          </div>
+        )}
 
-          {zonasEncargado.otros.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
-        </>
-      )}
+        {/* Encargado: zonas operativas */}
+        {!loadingPedidos && isEncargado && zonasEncargado && (
+          <>
+            {zonasEncargado.accion.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", marginTop: "4px" }}>
+                <span style={{ fontSize: "0.67rem", fontWeight: 700, color: "#dc2626", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                  ⚡ Requiere tu acción
+                </span>
+                <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: "0.68rem", fontWeight: 700, padding: "1px 8px", borderRadius: "999px" }}>
+                  {zonasEncargado.accion.reduce((s, [,,t]) => s + t, 0)}
+                </span>
+              </div>
+            )}
+            {zonasEncargado.accion.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
 
-      {/* Otros roles: lista plana */}
-      {!loadingPedidos && !isEncargado &&
-        estadosOrdenados.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
+            {zonasEncargado.ejecucion.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", marginTop: "14px" }}>
+                <span style={{ fontSize: "0.67rem", fontWeight: 700, color: "#7c3aed", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                  ⚙️ En ejecución
+                </span>
+                <span style={{ background: "#ede9fe", color: "#7c3aed", fontSize: "0.68rem", fontWeight: 700, padding: "1px 8px", borderRadius: "999px" }}>
+                  {zonasEncargado.ejecucion.reduce((s, [,,t]) => s + t, 0)}
+                </span>
+              </div>
+            )}
+            {zonasEncargado.ejecucion.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
+
+            {zonasEncargado.otros.length > 0 && (
+              <div style={{ marginTop: "14px" }}>
+                {zonasEncargado.otros.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Otros roles: lista plana */}
+        {!loadingPedidos && !isEncargado &&
+          estadosOrdenados.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
+      </div>
     </div>
   );
 }
