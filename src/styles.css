@@ -2758,8 +2758,7 @@ select.w-full.border.rounded {
 
 /* Wrapper de página full-width para Pedidos Web */
 .pedidosweb-page {
-  padding: var(--space-4);
-  padding-bottom: 0;
+  padding: 20px 24px 0;
   width: 100%;
   box-sizing: border-box;
 }
@@ -2768,23 +2767,23 @@ select.w-full.border.rounded {
 .pedidosweb-layout {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 16px;
+  gap: 20px;
 }
 @media (min-width: 768px) {
   .pedidosweb-layout {
-    /* Lista fija ~380px, panel toma el resto del espacio disponible */
-    grid-template-columns: 380px 1fr;
-    height: calc(100vh - 130px);
+    grid-template-columns: 440px 1fr;
+    height: calc(100vh - 126px);
     overflow: hidden;
     align-items: stretch;
-    gap: 16px;
+    gap: 20px;
   }
   .pedidosweb-left  { overflow-y: auto; }
   .pedidosweb-right { overflow-y: auto; }
 }
 @media (min-width: 1400px) {
   .pedidosweb-layout {
-    grid-template-columns: 420px 1fr;
+    grid-template-columns: 500px 1fr;
+    gap: 24px;
   }
 }
 
@@ -2800,7 +2799,7 @@ select.w-full.border.rounded {
   overflow: hidden;
 }
 .pedidosweb-panel__header {
-  padding: 16px 24px;
+  padding: 20px 28px;
   border-bottom: 1px solid #eef2f7;
   flex-shrink: 0;
   background: #fafbfc;
@@ -2808,10 +2807,13 @@ select.w-full.border.rounded {
 .pedidosweb-panel__body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 24px;
+  padding: 20px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 .pedidosweb-panel__footer {
-  padding: 14px 24px;
+  padding: 16px 28px;
   border-top: 1px solid #eef2f7;
   flex-shrink: 0;
   background: #fafbfc;
@@ -2820,11 +2822,34 @@ select.w-full.border.rounded {
 /* Meta grid — 4 cols en desktop */
 .pedidosweb-panel__header .meta {
   grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
 }
 @media (min-width: 900px) {
   .pedidosweb-panel__header .meta {
     grid-template-columns: repeat(4, 1fr);
   }
+}
+.pedidosweb-panel__header .meta-label { font-size: 11px; }
+.pedidosweb-panel__header .meta-value { font-size: 14px; }
+
+/* Fila seleccionada — notoria, no confundir con row--nuevo (azul claro) */
+.row--seleccionado,
+.row--seleccionado:hover {
+  background: #1e40af !important;
+  color: #fff !important;
+}
+.row--seleccionado td { color: #fff !important; }
+.row--seleccionado td:first-child {
+  border-left: 4px solid #93c5fd !important;
+}
+/* Chip de depósito y pills dentro de fila seleccionada */
+.row--seleccionado span[style] {
+  background: rgba(255,255,255,0.25) !important;
+  color: #fff !important;
+}
+.row--seleccionado .pill {
+  background: rgba(255,255,255,0.2) !important;
+  color: #fff !important;
 }
 
 /* Tabla de stock — sin scroll horizontal */
