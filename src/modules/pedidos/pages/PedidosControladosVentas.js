@@ -1,461 +1,519 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, onSnapshot, query, where, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../../firebase";
 import { norm } from "utils/text";
 import SearchBar from "../components/SearchBar";
+import { useApp } from "../../../context/AppContext";
 
-/* ===================== helpers de fecha ===================== */
-
+/* ── helpers fecha ── */
 function getPedidoDate(p) {
   if (p?.finFechaTS?.seconds) return new Date(p.finFechaTS.seconds * 1000);
   if (p?.finFecha) return new Date(`${p.finFecha}T00:00:00`);
-  if (p?.timestamps?.creado?.seconds)
-    return new Date(p.timestamps.creado.seconds * 1000);
+  if (p?.timestamps?.creado?.seconds) return new Date(p.timestamps.creado.seconds * 1000);
   return null;
 }
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+function formatFechaCorta(p) {
+  const d = getPedidoDate(p);
+  if (!d || isNaN(d)) return null;
+  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
 }
 
-function daysDiff(a, b) {
-  const ms = startOfDay(a).getTime() - startOfDay(b).getTime();
-  return Math.round(ms / 86400000);
+function startOfDay(d) { const x = new Date(d); x.setHours(0,0,0,0); return x; }
+function daysDiff(a, b) { return Math.round((startOfDay(a).getTime() - startOfDay(b).getTime()) / 86400000); }
+
+function getUrgencia(p) {
+  const d = getPedidoDate(p);
+  if (!d) return null;
+  const diff = daysDiff(new Date(), d);
+  if (diff > 0) return "vencido";
+  if (diff === 0) return "hoy";
+  return null;
 }
 
-const BUCKET_ORDER = ["HOY", "AYER", "ÚLTIMA SEMANA", "ÚLTIMO MES"];
-
-function bucketLabelByDate(d) {
-  if (!d) return "ÚLTIMO MES";
-  const today = new Date();
-  const diff = daysDiff(today, d);
-  if (diff === 0) return "HOY";
-  if (diff === 1) return "AYER";
-  if (diff <= 7) return "ÚLTIMA SEMANA";
-  return "ÚLTIMO MES";
+function formatTimeAgo(ts) {
+  if (!ts) return null;
+  const date = ts?.seconds ? new Date(ts.seconds * 1000) : new Date(ts);
+  if (isNaN(date)) return null;
+  const mins = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return `${Math.floor(hrs / 24)}d`;
 }
 
-/** { [estado]: { [bucket]: Pedido[] } } */
-function agruparPorEstadoYBucketFecha(pedidos) {
-  const out = {};
-  for (const p of pedidos) {
-    const estado = p?.estado || "CONTROLADO";
-    const d = getPedidoDate(p);
-    const bucket = bucketLabelByDate(d);
-
-    if (!out[estado]) out[estado] = {};
-    if (!out[estado][bucket]) out[estado][bucket] = [];
-    out[estado][bucket].push(p);
-  }
-
-  // ordenamos buckets por BUCKET_ORDER y pedidos por fecha desc
-  for (const estado of Object.keys(out)) {
-    for (const bucket of Object.keys(out[estado])) {
-      out[estado][bucket].sort((a, b) => {
-        const da = getPedidoDate(a)?.getTime() ?? 0;
-        const db = getPedidoDate(b)?.getTime() ?? 0;
-        return db - da;
-      });
-    }
-    const ordered = {};
-    for (const key of BUCKET_ORDER) {
-      if (out[estado][key]) ordered[key] = out[estado][key];
-    }
-    out[estado] = ordered;
-  }
-
-  return out;
-}
-
-/* ===================== helpers de pedidos ===================== */
-
-function getResponsable(p) {
-  return (
-    p?.asignadoNombre ||
-    p?.asignado?.nombre ||
-    p?.asignado?.displayName ||
-    p?.operarioNombre ||
-    p?.responsableNombre ||
-    p?.responsable?.nombre ||
-    null
-  );
-}
-
-const ESTADOS_VENTAS = ["CONTROLADO", "DESPACHADO"];
-
-const LABEL_BUCKET = {
-  HOY: "Hoy",
-  "AYER": "Ayer",
-  "ÚLTIMA SEMANA": "Última semana",
-  "ÚLTIMO MES": "Último mes",
+const METODO_COLORS = {
+  AGENCIA: { bg: "#eff6ff", color: "#1d4ed8" },
+  RETIRA:  { bg: "#f0fdf4", color: "#15803d" },
+  CAMION:  { bg: "#fef3c7", color: "#92400e" },
+  GIRA:    { bg: "#fdf4ff", color: "#7e22ce" },
 };
 
-const LABEL_ESTADO = {
-  CONTROLADO: "CONTROLADOS",
-  DESPACHADO: "DESPACHADOS",
-};
-
-/* ===================== componente principal ===================== */
-
+/* ── componente ── */
 export default function PedidosControladosVentas() {
-  const [pedidos, setPedidos] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { toast } = useApp();
+  const [controlados, setControlados] = useState([]);
+  const [conProblema, setConProblema]  = useState([]);
+  const [despsHoy, setDespsHoy]       = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [q, setQ]                     = useState("");
+  const [debouncedQ, setDebouncedQ]   = useState("");
 
-  // NUEVO: pedidos despachados HOY desde la colección pedidos_despachados
-  const [despsHoy, setDespsHoy] = useState([]);
+  // Modal "Avisar cliente"
+  const [avisando, setAvisando]       = useState(null); // pedido seleccionado
+  const [notaAviso, setNotaAviso]     = useState("");
+  const [savingAviso, setSavingAviso] = useState(false);
 
-
-  const [q, setQ] = useState("");
-  const [debouncedQ, setDebouncedQ] = useState("");
-
-  // colapsables
-  const [collapsedStates, setCollapsedStates] = useState(() => new Set());
-  const [collapsedBuckets, setCollapsedBuckets] = useState(() => new Set());
-
-  /* ---------- listener Firestore ---------- */
+  /* ── listeners ── */
   useEffect(() => {
-    const ref = collection(db, "pedidos");
-    // SOLO traer CONTROLADOS desde la colección pedidos
-    const qy = query(ref, where("estado", "==", "CONTROLADO"));
-
-
-    const unsub = onSnapshot(
-      qy,
+    // 1. Pedidos CONTROLADOS
+    const unsubCtrl = onSnapshot(
+      query(collection(db, "pedidos"), where("estado", "==", "CONTROLADO")),
       (snap) => {
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        console.log("📦 CONTROLADOS desde colección pedidos:", list);
-        setPedidos(list);
+        setControlados(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         setLoading(false);
       },
-      (err) => {
-        console.error("[Ventas] error escuchando pedidos:", err);
-        setLoading(false);
-      }
+      (err) => { console.error(err); setLoading(false); }
     );
 
+    // 2. Pedidos con problema ELEVADO (cualquier estado)
+    const unsubProb = onSnapshot(
+      query(collection(db, "pedidos"), where("problema.estado", "==", "ELEVADO")),
+      (snap) => setConProblema(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (err) => console.error("[Ventas] problemas:", err)
+    );
 
+    // 3. Despachados HOY
+    const today = new Date(); today.setHours(0,0,0,0);
+    const end   = new Date(today); end.setHours(23,59,59,999);
+    const unsubDesp = onSnapshot(
+      query(collection(db, "pedidos_despachados"),
+        where("despachadoAt", ">=", today),
+        where("despachadoAt", "<=", end)),
+      (snap) => setDespsHoy(snap.docs.map(d => ({ id: d.id, ...d.data(), estado: "DESPACHADO" }))),
+      (err) => console.error("[Ventas] despachados:", err)
+    );
 
-    return () => unsub();
+    return () => { unsubCtrl(); unsubProb(); unsubDesp(); };
   }, []);
 
-  /* ---------- listener a pedidos_despachados (solo HOY) ---------- */
-  useEffect(() => {
-    // inicio del día
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const start = today;  
-    const end = new Date(today);
-    end.setHours(23, 59, 59, 999);
-
-    const col = collection(db, "pedidos_despachados");
-    const qy = query(
-      col,
-      where("despachadoAt", ">=", start),
-      where("despachadoAt", "<=", end)
-    );
-
-    const unsub = onSnapshot(
-      qy,
-      (snap) => {
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data(), estado: "DESPACHADO" }));
-        console.log("🚚 DESPACHADOS HOY desde pedidos_despachados:", list);
-        setDespsHoy(list);
-      },
-      (err) => {
-        console.error("[Ventas] error escuchando pedidos_despachados:", err);
-      }
-    );
-
-
-
-    return () => unsub();
-  }, []);
-
-
-
-  /* ---------- debounce de búsqueda ---------- */
   useEffect(() => {
     const id = setTimeout(() => setDebouncedQ(q), 200);
     return () => clearTimeout(id);
   }, [q]);
 
-  /* ---------- filtro por búsqueda ---------- */
-  const pedidosFiltrados = useMemo(() => {
-    if (!debouncedQ) return pedidos;
+  /* ── filtrado ── */
+  function filtrar(lista) {
+    if (!debouncedQ) return lista;
     const nq = norm(debouncedQ);
-
-    return pedidos.filter((p) => {
-      const numero = norm(p.numero || p.id || "");
-      const cliente = norm(p.cliente || "");
-      const desc = norm(p.descripcion || "");
-      const metodo = norm(p.metodoEntrega || "");
-      return (
-        numero.includes(nq) ||
-        cliente.includes(nq) ||
-        desc.includes(nq) ||
-        metodo.includes(nq)
-      );
-    });
-  }, [pedidos, debouncedQ]);
-
-  /* ---------- normalize estado + agrupar ---------- */
-  const pedidosEnriquecidos = useMemo(
-    () =>
-      (pedidosFiltrados || []).map((p) => {
-        const estado = String(p.estado || "").toUpperCase();
-        return { ...p, estado };
-      }),
-    [pedidosFiltrados]
-  );
-
-  const grupos = useMemo(
-    () => agruparPorEstadoYBucketFecha(pedidosEnriquecidos),
-    [pedidosEnriquecidos]
-  );
-
-  // → Inyectar DESPACHADOS HOY en los grupos
-  const gruposConDesp = useMemo(() => {
-    const g = { ...grupos };
-
-    if (despsHoy.length > 0) {
-      if (!g["DESPACHADO"]) g["DESPACHADO"] = {};
-      g["DESPACHADO"]["HOY"] = despsHoy;
-    }
-
-    return g;
-  }, [grupos, despsHoy]);
-
-
-  const estadosOrdenados = useMemo(() => {
-    const out = [];
-
-    for (const est of ESTADOS_VENTAS) {
-      const porFecha = gruposConDesp[est];
-      if (!porFecha) continue;
-      const total = Object.values(porFecha).reduce(
-        (acc, arr) => acc + arr.length,
-        0
-      );
-      if (total > 0) out.push([est, porFecha, total]);
-    }
-
-    return out;
-  }, [gruposConDesp]);
-
-  /* ===================== handlers UI ===================== */
-
-  function toggleEstado(estado) {
-    setCollapsedStates((prev) => {
-      const next = new Set(prev);
-      if (next.has(estado)) next.delete(estado);
-      else next.add(estado);
-      return next;
-    });
-  }
-
-  function toggleBucket(estado, bucket) {
-    const key = `${estado}::${bucket}`;
-    setCollapsedBuckets((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
-  /* ===================== render helpers ===================== */
-
-  function renderCard(p) {
-    return (
-      <a
-        key={p.id}
-        href={`/ventas/para-despachar/${encodeURIComponent(p.id)}`}
-        className="card order-card card--selectable"
-      >
-        <div className="order-head">
-          <div className="order-number">#{p.numero || p.id}</div>
-
-          {getResponsable(p) && (
-            <span className="pill pill--user" title="Responsable asignado">
-              {getResponsable(p)}
-            </span>
-          )}
-
-          <span className="pill pill--info">
-            {p.metodoEntrega || "—"}
-          </span>
-        </div>
-
-        <div className="order-body">
-          <div className="order-field">
-            <span className="order-label">Fecha (Finnegans)</span>
-            <span className="order-value">{p.finFecha || "—"}</span>
-          </div>
-          <div className="order-field">
-            <span className="order-label">Cliente</span>
-            <span className="order-value">{p.cliente || "—"}</span>
-          </div>
-          <div className="order-field">
-            <span className="order-label">Depósito</span>
-            <span className="order-value">{p.deposito || "—"}</span>
-          </div>
-          {getResponsable(p) && (
-            <div className="order-field">
-              <span className="order-label">Responsable</span>
-              <span className="order-value">{getResponsable(p)}</span>
-            </div>
-          )}
-          <div className="order-field">
-            <span className="order-label">Ítems</span>
-            <span className="order-value">
-              {p.productos?.length ?? 0}
-            </span>
-          </div>
-          {p.bultos != null && (
-            <div className="order-field">
-              <span className="order-label">Bultos</span>
-              <span className="order-value">{p.bultos}</span>
-            </div>
-          )}
-          {p.paquetes != null && (
-            <div className="order-field">
-              <span className="order-label">Paquetes</span>
-              <span className="order-value">{p.paquetes}</span>
-            </div>
-          )}
-        </div>
-      </a>
+    return lista.filter(p =>
+      norm(p.numero || p.id || "").includes(nq) ||
+      norm(p.cliente || "").includes(nq) ||
+      norm(p.metodoEntrega || "").includes(nq)
     );
   }
 
-  /* ===================== render ===================== */
+  const controladosFiltrados = useMemo(() => filtrar(controlados), [controlados, debouncedQ]);
+  const conProblemaFiltrados = useMemo(() => filtrar(conProblema), [conProblema, debouncedQ]);
 
-  console.log("🔵 gruposConDesp:", gruposConDesp);
-  console.log("🟢 estadosOrdenados:", estadosOrdenados);
+  /* ── avisar al cliente ── */
+  async function confirmarAviso() {
+    if (!avisando) return;
+    const wid = avisando.webPedidoId || avisando.pedidoWebId || null;
+    try {
+      setSavingAviso(true);
+      // Siempre actualizar el campo en el pedido interno
+      await updateDoc(doc(db, "pedidos", avisando.id), {
+        "problema.avisadoClienteAt": serverTimestamp(),
+        "problema.notaAviso": notaAviso.trim() || null,
+      });
+      // Si tiene link a pedido web, actualizar ese también
+      if (wid) {
+        await updateDoc(doc(db, "pedidos_web", wid), {
+          estado: "ERROR_STOCK",
+          notaError: notaAviso.trim() ||
+            `Hay un problema con tu pedido: ${avisando.problema?.productoNombre || "un producto"} (${
+              avisando.problema?.tipo === "FALTA_STOCK" ? "falta de stock" : "otro motivo"
+            }). Serás contactado por WhatsApp.`,
+          errorAt: serverTimestamp(),
+        });
+      }
+      toast.success(wid ? "Cliente avisado en la app ✓" : "Problema registrado ✓ (sin app cliente vinculada)");
+      setAvisando(null);
+      setNotaAviso("");
+    } catch (e) {
+      console.error(e);
+      toast.error("No se pudo avisar al cliente");
+    } finally {
+      setSavingAviso(false);
+    }
+  }
 
+  /* ── card de pedido ── */
+  function renderCard(p, tipo) {
+    const urgencia = getUrgencia(p);
+    const urgColor = urgencia === "vencido" ? "#ef4444" : urgencia === "hoy" ? "#f59e0b" : null;
+    const metodoStyle = METODO_COLORS[p.metodoEntrega] || { bg: "#f8fafc", color: "#475569" };
+    const itemCount = p.productos?.length ?? 0;
+    const fechaCorta = formatFechaCorta(p);
+    const timeAgo = tipo === "problema"
+      ? formatTimeAgo(p.problema?.elevadoAt)
+      : formatTimeAgo(p.timestamps?.CONTROLADO);
+    const yaAvisado = !!p.problema?.avisadoClienteAt;
+
+    return (
+      <div
+        key={p.id}
+        style={{
+          background: "#fff",
+          borderRadius: "14px",
+          border: tipo === "problema" ? "1.5px solid #fca5a5" : "1px solid #e2e8f0",
+          borderLeft: tipo === "problema"
+            ? "4px solid #ef4444"
+            : urgColor
+            ? `4px solid ${urgColor}`
+            : "1px solid #e2e8f0",
+          padding: "13px 14px",
+          marginBottom: "8px",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+        }}
+      >
+        {/* Fila 1: número + método + tiempo */}
+        <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "4px" }}>
+          <a
+            href={`/ventas/para-despachar/${encodeURIComponent(p.id)}`}
+            style={{ fontWeight: 700, fontSize: "0.88rem", color: "#0f172a", textDecoration: "none" }}
+          >
+            #{p.numero || p.id}
+          </a>
+          {p.metodoEntrega && (
+            <span style={{
+              fontSize: "0.63rem", fontWeight: 700, padding: "2px 7px",
+              borderRadius: "999px", letterSpacing: "0.05em", flexShrink: 0,
+              background: metodoStyle.bg, color: metodoStyle.color,
+            }}>
+              {p.metodoEntrega}
+            </span>
+          )}
+          {urgencia && tipo !== "problema" && (
+            <span style={{
+              marginLeft: "auto", flexShrink: 0, fontSize: "0.63rem", fontWeight: 700,
+              padding: "2px 7px", borderRadius: "999px",
+              background: urgencia === "vencido" ? "#fef2f2" : "#fefce8", color: urgColor,
+            }}>
+              {urgencia === "vencido" ? "⚠ Vencido" : "⏰ Hoy"}
+            </span>
+          )}
+          {timeAgo && !urgencia && (
+            <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "#94a3b8", flexShrink: 0 }}>
+              ⏱ {timeAgo}
+            </span>
+          )}
+        </div>
+
+        {/* Fila 2: cliente */}
+        <p style={{
+          margin: "0 0 5px", fontSize: "0.95rem", fontWeight: 700, color: "#0f172a",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          {p.cliente || "—"}
+        </p>
+
+        {/* Fila 3: ítems + fecha + bultos */}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: tipo === "problema" ? "10px" : 0 }}>
+          <span style={{ fontSize: "0.76rem", color: "#64748b" }}>
+            {itemCount} ítem{itemCount !== 1 ? "s" : ""}
+          </span>
+          {fechaCorta && (
+            <>
+              <span style={{ fontSize: "0.7rem", color: "#cbd5e1" }}>·</span>
+              <span style={{ fontSize: "0.76rem", color: urgColor || "#64748b" }}>📅 {fechaCorta}</span>
+            </>
+          )}
+          {p.bultos > 0 && (
+            <>
+              <span style={{ fontSize: "0.7rem", color: "#cbd5e1" }}>·</span>
+              <span style={{ fontSize: "0.76rem", color: "#64748b" }}>📦 {p.bultos} bultos</span>
+            </>
+          )}
+          {tipo !== "problema" && (
+            <a
+              href={`/ventas/para-despachar/${encodeURIComponent(p.id)}`}
+              style={{ marginLeft: "auto", fontSize: "0.8rem", fontWeight: 700, color: "#0891b2", textDecoration: "none" }}
+            >
+              Despachar →
+            </a>
+          )}
+        </div>
+
+        {/* Bloque de problema (solo en sección problemas) */}
+        {tipo === "problema" && p.problema && (
+          <div style={{ background: "#fef2f2", borderRadius: "10px", padding: "10px 12px", marginBottom: "10px" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
+              <span style={{ fontSize: "0.9rem", flexShrink: 0 }}>
+                {p.problema.tipo === "FALTA_STOCK" ? "📦" : "⚠️"}
+              </span>
+              <div>
+                <p style={{ margin: 0, fontSize: "0.82rem", fontWeight: 700, color: "#dc2626" }}>
+                  {p.problema.tipo === "FALTA_STOCK" ? "Falta de stock" : "Otro problema"} — {p.problema.productoNombre || "producto sin nombre"}
+                </p>
+                {p.problema.descripcion && (
+                  <p style={{ margin: "3px 0 0", fontSize: "0.78rem", color: "#7f1d1d", fontStyle: "italic" }}>
+                    "{p.problema.descripcion}"
+                  </p>
+                )}
+                {p.problema.notaEncargado && (
+                  <p style={{ margin: "3px 0 0", fontSize: "0.76rem", color: "#9a3412" }}>
+                    Encargado: "{p.problema.notaEncargado}"
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Acciones en sección problemas */}
+        {tipo === "problema" && (
+          <div style={{ display: "flex", gap: "8px" }}>
+            <a
+              href={`/ventas/para-despachar/${encodeURIComponent(p.id)}`}
+              style={{
+                flex: 1, padding: "9px", background: "#f8fafc",
+                border: "1.5px solid #e2e8f0", borderRadius: "10px",
+                fontWeight: 600, fontSize: "0.82rem", color: "#475569",
+                textDecoration: "none", textAlign: "center",
+              }}
+            >
+              Ver detalle
+            </a>
+            {yaAvisado ? (
+              <div style={{
+                flex: 1, padding: "9px", background: "#f0fdf4",
+                border: "1.5px solid #86efac", borderRadius: "10px",
+                fontWeight: 600, fontSize: "0.82rem", color: "#16a34a",
+                textAlign: "center",
+              }}>
+                ✓ Avisado
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setAvisando(p); setNotaAviso(""); }}
+                style={{
+                  flex: 1, padding: "9px", background: "#fef2f2",
+                  border: "1.5px solid #fca5a5", borderRadius: "10px",
+                  fontWeight: 700, fontSize: "0.82rem", color: "#dc2626",
+                  cursor: "pointer",
+                }}
+              >
+                📲 Avisar cliente
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const totalAccion = controladosFiltrados.length + conProblemaFiltrados.length;
 
   return (
-    <div className="container">
-      {/* encabezado simple para PC */}
-      <div className="deck-head" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div className="deck-title">Listos para despachar</div>
+    <div style={{ background: "#f8fafc", minHeight: "100vh" }}>
 
-        <a
-          href="/ventas/despachados"
-          className="btn btn--small"
-          style={{ padding: "6px 12px", fontSize: 14 }}
-        >
-          Ver históricos
-        </a>
-      </div>
-
-
-      {/* buscador igual al de pedidos.js */}
-      <div className="mt-2" style={{ marginBottom: 16 }}>
+      {/* ── Header ── */}
+      <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "14px 16px 12px", position: "sticky", top: 0, zIndex: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+          <h1 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800, color: "#0f172a", flex: 1 }}>
+            Para despachar
+          </h1>
+          {!loading && totalAccion > 0 && (
+            <span style={{ background: "#dc2626", color: "#fff", fontSize: "0.72rem", fontWeight: 700, padding: "3px 10px", borderRadius: "999px" }}>
+              {totalAccion} pendiente{totalAccion !== 1 ? "s" : ""}
+            </span>
+          )}
+          <a
+            href="/ventas/despachados"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: "34px", height: "34px",
+              background: "#f8fafc", border: "1px solid #e2e8f0",
+              borderRadius: "10px", textDecoration: "none", fontSize: "1rem",
+            }}
+            title="Histórico de despachos"
+          >
+            📋
+          </a>
+        </div>
         <SearchBar
           value={q}
           onChange={setQ}
           onClear={() => setQ("")}
-          placeholder="Buscar por #PEDVTA, cliente, método o descripción…"
+          placeholder="Buscar cliente, #pedido…"
         />
       </div>
 
-      {loading && (
-        <div className="card card--compact empty-card">
-          <div className="muted">Cargando pedidos…</div>
-        </div>
-      )}
+      {/* ── Contenido ── */}
+      <div style={{ padding: "12px 12px 80px" }}>
 
-      {!loading && estadosOrdenados.length === 0 && (
-        <div className="card card--compact empty-card">
-          <div className="muted">No hay pedidos para mostrar.</div>
-        </div>
-      )}
+        {loading && (
+          <div style={{ textAlign: "center", padding: "48px 0", color: "#94a3b8", fontSize: "0.9rem" }}>
+            Cargando pedidos…
+          </div>
+        )}
 
-      {!loading &&
-        estadosOrdenados.map(([estado, porFecha, totalEstado]) => {
-          const stateClass = `state--${estado
-            .toLowerCase()
-            .replaceAll("_", "-")}`;
-          const collapsedState = collapsedStates.has(estado);
-          const labelEstado = LABEL_ESTADO[estado] || estado;
-          
-          return (
-            <section
-              key={estado}
-              className={`section section--state ${stateClass}`}
-            >
-              {/* Título del estado, clickeable para colapsar */}
-              <div
-                className="section-title section-title--state"
-                onClick={() => toggleEstado(estado)}
-                style={{ cursor: "pointer" }}
-              >
-                <span className="state-label">{labelEstado}</span>
-                <span className="state-count">{totalEstado}</span>
-                <span
-                  className="chev chev--sm"
-                  style={{
-                    display: "inline-block",
-                    transform: collapsedState ? "rotate(-90deg)" : "rotate(0deg)",
-                    transition: "transform .15s ease-in-out",
-                    marginLeft: 8,
-                  }}
-                >
-                  ⌄
-                </span>
-              </div>
+        {!loading && controladosFiltrados.length === 0 && conProblemaFiltrados.length === 0 && despsHoy.length === 0 && (
+          <div style={{ textAlign: "center", padding: "48px 16px" }}>
+            <div style={{ fontSize: "2.5rem", marginBottom: "10px" }}>📭</div>
+            <p style={{ color: "#94a3b8", fontSize: "0.9rem", margin: 0 }}>No hay pedidos para mostrar.</p>
+          </div>
+        )}
 
-              {/* Buckets por fecha */}
-              {!collapsedState && (
-                <div className="section-children">
-                  {Object.entries(porFecha).map(([bucket, items]) => {
-                    const key = `${estado}::${bucket}`;
-                    const collapsedBucket = collapsedBuckets.has(key);
-                    const labelBucket = LABEL_BUCKET[bucket] || bucket;
+        {/* ── Sección: Problemas elevados ── */}
+        {!loading && conProblemaFiltrados.length > 0 && (
+          <div style={{ marginBottom: "20px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "9px" }}>
+              <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#dc2626", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                🚨 Requieren atención
+              </span>
+              <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: "0.68rem", fontWeight: 700, padding: "1px 8px", borderRadius: "999px" }}>
+                {conProblemaFiltrados.length}
+              </span>
+            </div>
+            {conProblemaFiltrados.map(p => renderCard(p, "problema"))}
+          </div>
+        )}
 
-                    if (!items || items.length === 0) return null;
+        {/* ── Sección: Controlados para despachar ── */}
+        {!loading && controladosFiltrados.length > 0 && (
+          <div style={{ marginBottom: "20px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "9px" }}>
+              <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#0891b2", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                📦 Listos para despachar
+              </span>
+              <span style={{ background: "#ecfeff", color: "#0891b2", fontSize: "0.68rem", fontWeight: 700, padding: "1px 8px", borderRadius: "999px" }}>
+                {controladosFiltrados.length}
+              </span>
+            </div>
+            {controladosFiltrados.map(p => renderCard(p, "controlado"))}
+          </div>
+        )}
 
-                    return (
-                      <div key={bucket} className="subsection">
-                        <div
-                          className="subsection-title"
-                          onClick={() => toggleBucket(estado, bucket)}
-                          style={{ cursor: "pointer" }}
-                        >
-                          <span>{labelBucket}</span>
-                          <span className="muted">{items.length}</span>
-                          <span
-                            className="chev chev--sm"
-                            style={{
-                              display: "inline-block",
-                              transform: collapsedBucket
-                                ? "rotate(-90deg)"
-                                : "rotate(0deg)",
-                              transition: "transform .15s ease-in-out",
-                            }}
-                          >
-                            ⌄
-                          </span>
-                        </div>
-
-                        {!collapsedBucket && (
-                          <div className="subsection-body">
-                            <div className="orders-grid">
-                              {items.map((p) => renderCard(p))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+        {/* ── Sección: Despachados hoy ── */}
+        {!loading && despsHoy.length > 0 && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "9px" }}>
+              <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#475569", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                🚚 Despachados hoy
+              </span>
+              <span style={{ background: "#f1f5f9", color: "#475569", fontSize: "0.68rem", fontWeight: 700, padding: "1px 8px", borderRadius: "999px" }}>
+                {despsHoy.length}
+              </span>
+            </div>
+            {despsHoy.map(p => {
+              const fechaCorta = formatFechaCorta(p);
+              const metodoStyle = METODO_COLORS[p.metodoEntrega] || { bg: "#f8fafc", color: "#475569" };
+              return (
+                <div key={p.id} style={{ background: "#fff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "11px 14px", marginBottom: "7px", opacity: 0.8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "3px" }}>
+                    <span style={{ fontWeight: 700, fontSize: "0.87rem", color: "#64748b" }}>#{p.numero || p.id}</span>
+                    {p.metodoEntrega && (
+                      <span style={{ fontSize: "0.63rem", fontWeight: 700, padding: "2px 7px", borderRadius: "999px", background: metodoStyle.bg, color: metodoStyle.color }}>
+                        {p.metodoEntrega}
+                      </span>
+                    )}
+                    <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "#94a3b8" }}>✓ Despachado</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: "0.88rem", fontWeight: 600, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.cliente || "—"}
+                  </p>
                 </div>
-              )}
-            </section>
-          );
-        })}
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Modal: Avisar cliente ── */}
+      {avisando && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "flex-end" }}>
+          <div style={{ background: "#fff", borderRadius: "20px 20px 0 0", padding: "24px 16px 40px", width: "100%", maxHeight: "80vh", overflow: "auto" }}>
+            {/* Título */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+              <h2 style={{ margin: 0, fontWeight: 700, fontSize: "1.05rem", color: "#0f172a" }}>
+                📲 Avisar al cliente
+              </h2>
+              <button
+                type="button"
+                onClick={() => { setAvisando(null); setNotaAviso(""); }}
+                style={{ background: "none", border: "none", fontSize: "1.2rem", color: "#94a3b8", cursor: "pointer" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Info del pedido */}
+            <div style={{ background: "#f8fafc", borderRadius: "12px", padding: "12px 14px", marginBottom: "16px" }}>
+              <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>
+                #{avisando.numero} — {avisando.cliente}
+              </p>
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "#dc2626", fontWeight: 600 }}>
+                {avisando.problema?.tipo === "FALTA_STOCK" ? "📦 Falta de stock" : "⚠️ Otro problema"} en {avisando.problema?.productoNombre || "un producto"}
+              </p>
+            </div>
+
+            {/* Conexión con app */}
+            {avisando.webPedidoId ? (
+              <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "10px", padding: "10px 12px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>✅</span>
+                <p style={{ margin: 0, fontSize: "0.8rem", color: "#15803d", fontWeight: 600 }}>
+                  Pedido vinculado a la app del cliente — se actualizará automáticamente
+                </p>
+              </div>
+            ) : (
+              <div style={{ background: "#fef9c3", border: "1px solid #fde047", borderRadius: "10px", padding: "10px 12px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>⚠️</span>
+                <p style={{ margin: 0, fontSize: "0.8rem", color: "#92400e" }}>
+                  Este pedido no tiene app cliente vinculada — solo quedará registrado el aviso internamente
+                </p>
+              </div>
+            )}
+
+            {/* Mensaje para el cliente */}
+            <p style={{ margin: "0 0 8px", fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Mensaje al cliente (opcional)
+            </p>
+            <textarea
+              value={notaAviso}
+              onChange={e => setNotaAviso(e.target.value)}
+              placeholder={`Ej: Hay un problema con "${avisando.problema?.productoNombre}". Serás contactado por WhatsApp a la brevedad.`}
+              rows={3}
+              style={{
+                width: "100%", padding: "12px",
+                border: "1.5px solid #e2e8f0", borderRadius: "12px",
+                fontSize: "0.9rem", resize: "none",
+                boxSizing: "border-box", marginBottom: "16px",
+              }}
+            />
+
+            <p style={{ margin: "0 0 14px", fontSize: "0.78rem", color: "#94a3b8", textAlign: "center" }}>
+              El cliente verá el aviso en la app y recibirá un contacto por WhatsApp
+            </p>
+
+            <button
+              type="button"
+              onClick={confirmarAviso}
+              disabled={savingAviso}
+              style={{
+                width: "100%", padding: "15px", borderRadius: "14px", border: "none",
+                background: "#dc2626", color: "#fff",
+                fontWeight: 700, fontSize: "1rem", cursor: "pointer",
+              }}
+            >
+              {savingAviso ? "Enviando aviso…" : "Confirmar y avisar al cliente"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
