@@ -360,24 +360,24 @@ export default function PedidosWeb() {
                       title="Clic para gestionar"
                     >
                       <td>
-                        <div style={{ fontWeight: 700, fontSize: "12px", whiteSpace: "nowrap" }}>
+                        <div style={{ fontWeight: 700, fontSize: "13px", whiteSpace: "nowrap" }}>
                           {p.finnegansId}
                         </div>
-                        <div style={{ marginTop: "2px" }}>
+                        <div style={{ marginTop: "3px" }}>
                           <span style={{
-                            fontSize: "10px", fontWeight: 600, padding: "1px 6px",
+                            fontSize: "11px", fontWeight: 600, padding: "2px 7px",
                             borderRadius: "4px", background: "#e0f2fe", color: "#0369a1",
                           }}>
                             {p.depositoAsignado || "—"}
                           </span>
                         </div>
                       </td>
-                      <td style={{ fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <td style={{ fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.clienteNombre}
                       </td>
-                      <td style={{ fontSize: "11px", color: "#64748b", whiteSpace: "nowrap" }}>
+                      <td style={{ fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>
                         <div>{p.fecha?.toDate().toLocaleDateString("es-UY", { day: "2-digit", month: "short" })}</div>
-                        <div style={{ color: "#94a3b8" }}>
+                        <div style={{ fontSize: "11px", color: "#94a3b8" }}>
                           {p.fecha?.toDate().toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" })}
                         </div>
                       </td>
@@ -469,11 +469,11 @@ export default function PedidosWeb() {
                     ? (depositoPrep || pedidoSeleccionado.depositoAsignado)
                     : pedidoSeleccionado.depositoAsignado;
                   return insuficientes.length > 0 ? (
-                    <div className="banner banner--error" style={{ marginBottom: "12px" }}>
+                    <div className="banner banner--error">
                       ⚠️ <strong>{insuficientes.length} producto{insuficientes.length > 1 ? "s" : ""} sin stock suficiente</strong> en {depMostrar}
                     </div>
                   ) : (
-                    <div className="banner banner--ok" style={{ marginBottom: "12px" }}>
+                    <div className="banner banner--ok">
                       ✅ <strong>Stock suficiente</strong> en {depMostrar} para todos los productos
                     </div>
                   );
@@ -483,7 +483,7 @@ export default function PedidosWeb() {
                 {pedidoSeleccionado.webPedidoId && (() => {
                   const info = ESTADO_DEPOSITO[pedidoInterno?.estado];
                   return (
-                    <div className="banner banner--info" style={{ marginBottom: "12px" }}>
+                    <div className="banner banner--info">
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <strong style={{ fontSize: "13px" }}>📦 Estado en Depósito</strong>
                         <span style={{ fontSize: "11px", color: "#64748b" }}>
@@ -511,7 +511,7 @@ export default function PedidosWeb() {
                 })()}
 
                 {pedidoSeleccionado.estado === "ERROR_STOCK" && pedidoSeleccionado.itemsConError?.length > 0 && (
-                  <div className="banner banner--error" style={{ marginBottom: "12px" }}>
+                  <div className="banner banner--error">
                     <strong>🔴 Productos con problema:</strong>
                     <ul style={{ margin: "6px 0 0", paddingLeft: "18px" }}>
                       {pedidoSeleccionado.itemsConError.map((it, i) => (
@@ -527,13 +527,13 @@ export default function PedidosWeb() {
                   </div>
                 )}
                 {pedidoSeleccionado.estado === "ERROR_STOCK" && !pedidoSeleccionado.itemsConError?.length && pedidoSeleccionado.notaError && (
-                  <div className="banner banner--error" style={{ marginBottom: "12px" }}>
+                  <div className="banner banner--error">
                     🔴 <strong>Nota del error:</strong> {pedidoSeleccionado.notaError}
                   </div>
                 )}
 
                 {pedidoSeleccionado.observaciones && (
-                  <div className="banner banner--warn" style={{ marginBottom: "12px" }}>
+                  <div className="banner banner--warn">
                     📝 <strong>Obs. del cliente:</strong> {pedidoSeleccionado.observaciones}
                   </div>
                 )}
