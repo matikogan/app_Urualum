@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useMemo, useEffect } from "react";
+import { useAuth } from "./AuthContext";
 
 const CARRITO_KEY = "urualum_carrito";
 
@@ -31,12 +32,24 @@ function useHapticsStub() {
 const Ctx = createContext(null);
 
 export function AppProvider({ children }) {
+  const { profile } = useAuth();
+
   // ==========================================
   // ESTADOS APP INTERNA DE STOCK (NO TOCAR)
   // ==========================================
   const [depositoActual, setDepositoActual] = useState("R8");
   const [metodoFiltro, setMetodoFiltro] = useState(null);
   const haptics = useHapticsStub();
+
+  // Sincronizar depositoActual con el depósito del usuario logueado
+  // (encargado e operario tienen un depósito asignado en su perfil)
+  useEffect(() => {
+    const rol = (profile?.rol || profile?.role || "").toLowerCase();
+    const dep = profile?.deposito;
+    if (dep && (rol === "encargado" || rol === "operario")) {
+      setDepositoActual(dep);
+    }
+  }, [profile?.deposito, profile?.rol, profile?.role]);
 
   // ==========================================
   // ESTADOS APP DE VENTAS / CLIENTES (NUEVO)
