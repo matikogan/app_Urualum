@@ -770,6 +770,18 @@ export default function PedidosPage() {
       }}>
         {/* Fila 1: título + depósito + acciones secundarias */}
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+          <a
+            href="/inicio"
+            title="Volver al inicio"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: "34px", height: "34px", flexShrink: 0,
+              background: "#f8fafc", border: "1px solid #e2e8f0",
+              borderRadius: "10px", textDecoration: "none", fontSize: "1rem",
+            }}
+          >
+            ←
+          </a>
           <h1 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800, color: "#0f172a", flex: 1 }}>
             Gestión de pedidos
           </h1>
