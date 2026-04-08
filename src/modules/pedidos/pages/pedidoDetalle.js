@@ -339,6 +339,8 @@ export default function PedidoDetalle() {
   const role = (profile?.rol || "").toLowerCase();
   const isVentas = role === "ventas";
   const isEncargado = role === "encargado";
+  // Cuando el encargado se auto-asignó, actúa como operario en prep.
+  const isSelfAssigned = !!pedido?.operarioId && pedido.operarioId === user?.uid;
 
   
 
@@ -973,7 +975,8 @@ const filteredOperarios = useMemo(() => {
   // ── Fin vista PENDIENTE_ASIGNAR ──────────────────────────────────────────
 
   // ── Vista especial ASIGNADO para encargado ───────────────────────────────
-  if (pedido.estado === ESTADOS.ASIGNADO && isEncargado) {
+  // (Omitir si es autoasignado: cae al main return con botón Comenzar)
+  if (pedido.estado === ESTADOS.ASIGNADO && isEncargado && !isSelfAssigned) {
     const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
 
     // Tiempo transcurrido desde asignación
@@ -1229,7 +1232,8 @@ const filteredOperarios = useMemo(() => {
   // ── Fin vista ASIGNADO ───────────────────────────────────────────────────
 
   // ── Vista especial EN_PREPARACION para encargado ─────────────────────────
-  if (pedido.estado === ESTADOS.EN_PREPARACION && isEncargado) {
+  // (Omitir si es autoasignado: cae al main return con EncPreparacionPanel)
+  if (pedido.estado === ESTADOS.EN_PREPARACION && isEncargado && !isSelfAssigned) {
     const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
     const problema = pedido.problema || null;
     const tieneProblemaActivo = problema && problema.estado === "PENDIENTE";
@@ -2191,6 +2195,24 @@ const filteredOperarios = useMemo(() => {
 
 
       {/* === Vista según estado === */}
+
+      {/* ASIGNADO: botón para iniciar preparación (operario o encargado autoasignado) */}
+      {pedido.estado === ESTADOS.ASIGNADO && pedido.operarioId === user?.uid && (
+        <div className="card">
+          <div className="subsection-body space-y-3">
+            <p className="text-sm muted">
+              Sos el responsable de preparar este pedido.
+            </p>
+            <button
+              className="btn bg-black text-white w-full disabled:opacity-60"
+              onClick={onComenzar}
+              disabled={saving}
+            >
+              🟡 Comenzar preparación
+            </button>
+          </div>
+        </div>
+      )}
 
       {pedido.estado === ESTADOS.PENDIENTE_ASIGNAR && (
         <div className="space-y-3">

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { collection, onSnapshot, query, where, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../../firebase";
 import { norm } from "utils/text";
@@ -52,6 +53,7 @@ const METODO_COLORS = {
 /* ── componente ── */
 export default function PedidosControladosVentas() {
   const { toast } = useApp();
+  const navigate  = useNavigate();
   const [controlados, setControlados] = useState([]);
   const [conProblema, setConProblema]  = useState([]);
   const [despsHoy, setDespsHoy]       = useState([]);
@@ -164,6 +166,7 @@ export default function PedidosControladosVentas() {
     return (
       <div
         key={p.id}
+        onClick={() => navigate(`/ventas/para-despachar/${encodeURIComponent(p.id)}`)}
         style={{
           background: "#fff",
           borderRadius: "14px",
@@ -176,16 +179,14 @@ export default function PedidosControladosVentas() {
           padding: "13px 14px",
           marginBottom: "8px",
           boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+          cursor: "pointer",
         }}
       >
         {/* Fila 1: número + método + tiempo */}
         <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "4px" }}>
-          <a
-            href={`/ventas/para-despachar/${encodeURIComponent(p.id)}`}
-            style={{ fontWeight: 700, fontSize: "0.88rem", color: "#0f172a", textDecoration: "none" }}
-          >
+          <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "#0f172a" }}>
             #{p.numero || p.id}
-          </a>
+          </span>
           {p.metodoEntrega && (
             <span style={{
               fontSize: "0.63rem", fontWeight: 700, padding: "2px 7px",
@@ -237,12 +238,9 @@ export default function PedidosControladosVentas() {
             </>
           )}
           {tipo !== "problema" && (
-            <a
-              href={`/ventas/para-despachar/${encodeURIComponent(p.id)}`}
-              style={{ marginLeft: "auto", fontSize: "0.8rem", fontWeight: 700, color: "#0891b2", textDecoration: "none" }}
-            >
+            <span style={{ marginLeft: "auto", fontSize: "0.8rem", fontWeight: 700, color: "#0891b2" }}>
               Despachar →
-            </a>
+            </span>
           )}
         </div>
 
@@ -274,18 +272,18 @@ export default function PedidosControladosVentas() {
 
         {/* Acciones en sección problemas */}
         {tipo === "problema" && (
-          <div style={{ display: "flex", gap: "8px" }}>
-            <a
-              href={`/ventas/para-despachar/${encodeURIComponent(p.id)}`}
+          <div style={{ display: "flex", gap: "8px" }} onClick={e => e.stopPropagation()}>
+            <span
               style={{
                 flex: 1, padding: "9px", background: "#f8fafc",
                 border: "1.5px solid #e2e8f0", borderRadius: "10px",
                 fontWeight: 600, fontSize: "0.82rem", color: "#475569",
-                textDecoration: "none", textAlign: "center",
+                textAlign: "center", cursor: "pointer",
               }}
+              onClick={() => navigate(`/ventas/para-despachar/${encodeURIComponent(p.id)}`)}
             >
               Ver detalle
-            </a>
+            </span>
             {yaAvisado ? (
               <div style={{
                 flex: 1, padding: "9px", background: "#f0fdf4",
@@ -298,7 +296,7 @@ export default function PedidosControladosVentas() {
             ) : (
               <button
                 type="button"
-                onClick={() => { setAvisando(p); setNotaAviso(""); }}
+                onClick={(e) => { e.stopPropagation(); setAvisando(p); setNotaAviso(""); }}
                 style={{
                   flex: 1, padding: "9px", background: "#fef2f2",
                   border: "1.5px solid #fca5a5", borderRadius: "10px",
@@ -323,6 +321,18 @@ export default function PedidosControladosVentas() {
       {/* ── Header ── */}
       <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "14px 16px 12px", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+          <a
+            href="/inicio"
+            title="Volver al inicio"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: "34px", height: "34px", flexShrink: 0,
+              background: "#f8fafc", border: "1px solid #e2e8f0",
+              borderRadius: "10px", textDecoration: "none", fontSize: "1rem",
+            }}
+          >
+            ←
+          </a>
           <h1 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800, color: "#0f172a", flex: 1 }}>
             Para despachar
           </h1>
