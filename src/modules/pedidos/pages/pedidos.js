@@ -270,7 +270,9 @@ export default function PedidosPage() {
     const unsub = listenPedidosByDeposito(depositoActual, {
       metodoEntrega: metodoFiltro || undefined,
       onChange: (snap) => {
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((p) => p.estado !== "ANULADO"); // excluir anulados de la vista operativa
                setPedidos(list);
               setLoadingPedidos(false);
 

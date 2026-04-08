@@ -1,5 +1,5 @@
 import { getPedidosPendientes } from "../../../API/finnegans";
-import { upsertPedidoDesdeFinnegans, actualizarPedidosControladosADespachado } from "./pedidosFS";
+import { upsertPedidoDesdeFinnegans, actualizarPedidosControladosADespachado, marcarAnuladosEnRango } from "./pedidosFS";
 import { mapFinDocToPedido } from "./mapFinnegans";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 
@@ -54,7 +54,7 @@ export async function syncPendientesDeHoy({ debug = false } = {}) {
     // --- ÚLTIMOS 5 DÍAS ---
     const hoy = new Date();
     const desde = new Date();
-    desde.setDate(hoy.getDate() - 5);
+    desde.setDate(hoy.getDate() - 15); // últimos 15 días para detectar anulaciones
 
     const fechaDesde = toYMD(desde);
     const fechaHasta = toYMD(hoy);
@@ -297,10 +297,19 @@ export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = false 
 
   await actualizarPedidosControladosADespachado(numerosFin);
 
+  // Detectar pedidos PENDIENTE_ASIGNAR que ya no existen en Finnegans → marcar ANULADO
+  // Usamos un Set con ambas formas del ID (con y sin prefijo "PEDVTA - ")
+  const idsActivos = new Set();
+  for (const id of pedidosMap.keys()) {
+    idsActivos.add(id);
+    idsActivos.add(id.replace(/^PEDVTA\s*-\s*/i, "").trim());
+  }
+  const fechaDesdeAnulacion = new Date();
+  fechaDesdeAnulacion.setDate(fechaDesdeAnulacion.getDate() - 15);
+  const anulados = await marcarAnuladosEnRango(idsActivos, fechaDesdeAnulacion);
+  if (anulados > 0) console.log(`[SYNC] Pedidos anulados automáticamente: ${anulados}`);
 
-
-
-  return resumen;
+  return { ...resumen, anulados };
 }
 
 
