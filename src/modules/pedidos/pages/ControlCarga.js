@@ -236,16 +236,24 @@ export default function ControlCarga() {
     setTimeout(() => setToastMsg(null), 3000);
   };
 
-  // ── Suscripción: despachados de esta semana con metodo AGENCIA
+  // ── Suscripción: despachados con metodo AGENCIA (filtro fecha en cliente)
   useEffect(() => {
-    const desde = startOfWeek();
+    const desde = startOfWeek(); // Timestamp
     const q = query(
       collection(db, "pedidos_despachados"),
       where("metodoEntrega", "==", "AGENCIA"),
-      where("despachadoAt", ">=", desde),
     );
     const unsub = onSnapshot(q, snap => {
-      setPedidos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const desdeMs = desde.toMillis();
+      const docs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(p => {
+          const at = p.despachadoAt;
+          if (!at) return true; // incluir si no tiene fecha (pedidos viejos sin campo)
+          const ms = at?.seconds ? at.seconds * 1000 : new Date(at).getTime();
+          return ms >= desdeMs;
+        });
+      setPedidos(docs);
       setLoading(false);
     });
     return () => unsub();
