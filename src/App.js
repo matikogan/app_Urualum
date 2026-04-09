@@ -35,7 +35,7 @@ import DespachadosHistorico from "./modules/pedidos/pages/DespachadosHistorico";
 import ErroresPreparacionPage from "modules/pedidos/pages/ErroresPreparacionPago";
 
 // Prueba
-import TestFinnegans from "pages/testFinnegans";
+import TestFinnegans from "modules/pedidos/pages/testFinnegans";
 import TestFSPage from "./pages/testFS";
 import TestSyncPage from "./pages/testSync";
 
