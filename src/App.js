@@ -177,10 +177,12 @@ export default function App() {
 
             {/* Páginas de test — solo admin */}
             <Route element={<ProtectedRoute roles={["admin"]} />}>
-              <Route path="/test-finnegans" element={<TestFinnegans />} />
               <Route path="/test-fs" element={<TestFSPage />} />
               <Route path="/test-sync" element={<TestSyncPage />} />
             </Route>
+
+            {/* Test Finnegans — temporalmente sin restricción para inspección */}
+            <Route path="/test-finnegans" element={<TestFinnegans />} />
           </Route>
         </Route>
 
