@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { getPedidosPendientes, getDespacho, getResumenStock } from "../../../API/finnegans";
 import { useApp } from "../../../context/AppContext";
 import { upsertPedidoDesdeFinnegans } from "../services/pedidosFS";
@@ -19,9 +20,11 @@ const CAMPOS_DESPACHO = [
 
 export default function TestFinnegans() {
   const { toast } = useApp();
-  const [data, setData]           = useState(null);
-  const [camposData, setCamposData] = useState(null);
-  const [loading, setLoading]     = useState(false);
+  const [data, setData]             = useState(null);
+  const [camposData, setCamposData]  = useState(null);
+  const [despachoData, setDespachoData] = useState(null);
+  const [loading, setLoading]       = useState(false);
+  const [pedidoTestId, setPedidoTestId] = useState("PEDVTA - 18672");
 
   async function loadPendientesUltMes() {
     setLoading(true);
@@ -105,6 +108,26 @@ export default function TestFinnegans() {
     finally { setLoading(false); }
   }
 
+  // ── NUEVO: probar Cloud Function despacharEnFinnegans (modoTest=true) ──
+  async function testDespacharCF() {
+    setLoading(true);
+    try {
+      const functions = getFunctions(undefined, "us-central1");
+      const despachar = httpsCallable(functions, "despacharEnFinnegans");
+      const result = await despachar({ pedidoId: pedidoTestId.trim(), modoTest: true });
+      setDespachoData(result.data);
+      setCamposData(null);
+      setData(null);
+      toast.success("Payload generado (modoTest) — revisá el resultado");
+    } catch (e) {
+      console.error(e);
+      toast.error(e.message || "Error llamando Cloud Function");
+      setDespachoData({ error: e.message });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function loadDespacho() {
     setLoading(true);
     try {
@@ -118,6 +141,32 @@ export default function TestFinnegans() {
   return (
     <div className="p-4 space-y-3">
       <h1 className="text-2xl font-bold">Test Finnegans</h1>
+
+      {/* ── Test Cloud Function despacho ── */}
+      <div className="border-2 border-orange-400 rounded p-3 space-y-2">
+        <p className="font-bold text-orange-700">🚀 Test Cloud Function — despacharEnFinnegans (modoTest)</p>
+        <p className="text-xs text-gray-500">Genera el payload completo sin enviarlo a Finnegans. Verificá que los datos sean correctos.</p>
+        <div className="flex gap-2 items-center">
+          <input
+            className="border rounded px-2 py-1 text-sm flex-1"
+            value={pedidoTestId}
+            onChange={e => setPedidoTestId(e.target.value)}
+            placeholder="ID pedido (ej: PEDVTA - 18672)"
+          />
+          <button
+            className="border px-3 py-1 rounded bg-orange-500 text-white font-bold"
+            onClick={testDespacharCF}
+            disabled={loading}
+          >
+            {loading ? "Llamando…" : "▶ Generar payload (modoTest)"}
+          </button>
+        </div>
+        {despachoData && (
+          <pre className="p-3 bg-gray-900 text-green-400 rounded overflow-auto text-xs">
+{JSON.stringify(despachoData, null, 2)}
+          </pre>
+        )}
+      </div>
 
       <div className="flex gap-2 flex-wrap">
         <button className="border px-3 py-1 rounded" onClick={loadPendientesUltMes} disabled={loading}>

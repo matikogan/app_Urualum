@@ -1,5 +1,40 @@
 import { parseDescripcionPedido } from "./parseDescripcionPedido";
 
+// Mapeo nombre → código de condición de pago (Finnegans no devuelve el código)
+const CONDICION_PAGO_MAP = {
+  "10 dias":               "10",
+  "15 dias":               "15",
+  "3 cuotas":              "3 CUOTAS",
+  "30 dias":               "30",
+  "30, 60 y 90 días":      "306090",
+  "30, 60 y 90 dias":      "306090",
+  "60 dias":               "60",
+  "7 dias":                "7 dias",
+  "90 dias":               "90",
+  "contado efectivo":      "CE",
+  "crédito":               "CREDITO",
+  "credito":               "CREDITO",
+  "débito automático":     "DEBAUT",
+  "debito automatico":     "DEBAUT",
+  "fecha del documento":   "CPG_FECHADOC",
+  "tarjeta de debito":     "TARJDEB",
+  "tarjeta de débito":     "TARJDEB",
+  "transferencia bancaria":"Transferencia",
+  "transferencia":         "Transferencia",
+};
+
+export function resolverCondicionPagoCod(nombre) {
+  if (!nombre) return null;
+  return CONDICION_PAGO_MAP[nombre.toLowerCase().trim()] || null;
+}
+
+// Extrae solo el código numérico del producto: "512523443 Superior Mos..." → "512523443"
+export function extraerCodigoProducto(raw) {
+  if (!raw) return "";
+  const match = String(raw).trim().match(/^(\d+)/);
+  return match ? match[1] : String(raw).trim();
+}
+
 // --- PARSER ROBUSTO DE FECHA DESDE FINNEGANS ---
 function normalizeToYMD(d) {
   // retorna "YYYY-MM-DD" o null
@@ -137,7 +172,8 @@ export function mapFinDocToPedido(fin) {
 
 
   // 4) Producto, cantidad y precio (viene por fila — una fila = un ítem)
-  const prodCod  = String(fin.PRODUCTO || fin.Producto || fin.ProductoCodigo || "").trim();
+  const prodRaw  = String(fin.PRODUCTO || fin.Producto || fin.ProductoCodigo || "").trim();
+  const prodCod  = extraerCodigoProducto(prodRaw); // solo el código numérico
   const prodCant = Number(fin.CANTIDAD ?? fin.Cantidad ?? 0);
 
   // Precio en moneda secundaria (USD) y principal (UYU)
@@ -148,6 +184,7 @@ export function mapFinDocToPedido(fin) {
 
   const productos = prodCod ? [{
     cod:         prodCod,
+    desc:        prodRaw,           // descripción completa para mostrar en UI
     cant:        prodCant || 0,
     precioUSD:   prodPrecioUSD || null,
     precioUYU:   prodPrecioUYU || null,
@@ -157,7 +194,8 @@ export function mapFinDocToPedido(fin) {
 
   // 5) Datos de pago y cliente (nivel pedido — tomamos de la primera fila)
   const condicionPago     = String(fin.CONDICIONPAGO || fin.CondicionPago || "").trim() || null;
-  const condicionPagoCod  = String(fin.CONDICIONPAGOCODIGO || fin.CondicionPagoCodigo || "").trim() || null;
+  // El código no viene de la API — lo resolvemos desde el nombre
+  const condicionPagoCod  = String(fin.CONDICIONPAGOCODIGO || fin.CondicionPagoCodigo || "").trim() || resolverCondicionPagoCod(condicionPago) || null;
   const clienteRUT        = String(fin.NRODEIDENTIFICACION || fin.NroDeIdentificacion || fin.RUT || "").trim() || null;
   const cotizacion        = Number(fin.COTIZACION ?? fin.Cotizacion ?? 0) || null;
   const moneda            = String(fin.MONEDA || fin.Moneda || "").trim() || null;

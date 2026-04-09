@@ -638,3 +638,172 @@ exports.notificarModificacionPedido = onDocumentUpdated(
     logger.info(`Notificada modificación en pedido ${numero}: ${cambios}`);
   }
 );
+
+// ======================================================================
+// CLOUD FUNCTION: despacharEnFinnegans
+// Recibe { pedidoId, depositoCodigo } y crea el remito en Finnegans
+// ======================================================================
+
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+
+const FINN_TOKEN_URL    = "https://api.teamplace.finneg.com/api/oauth/token";
+const FINN_CLIENT_ID    = "9a149172296f240d211a150e149fee06";
+const FINN_CLIENT_SECRET= "c8d871207c686405d1b8dc6ac0e9f80a";
+const FINN_API_BASE     = "https://api.finneg.com/api";
+const FINN_EMPRESA_COD  = "1";
+
+// Mapa depósito app → código Finnegans
+const DEPOSITO_CODIGOS = {
+  "R8":      "RUTA8",
+  "ISABELA": "ISABELA",
+};
+
+// Mapa nombre condición de pago → código Finnegans
+const CONDICION_PAGO_MAP = {
+  "10 dias":               "10",
+  "15 dias":               "15",
+  "3 cuotas":              "3 CUOTAS",
+  "30 dias":               "30",
+  "30, 60 y 90 días":      "306090",
+  "30, 60 y 90 dias":      "306090",
+  "60 dias":               "60",
+  "7 dias":                "7 dias",
+  "90 dias":               "90",
+  "contado efectivo":      "CE",
+  "crédito":               "CREDITO",
+  "credito":               "CREDITO",
+  "débito automático":     "DEBAUT",
+  "debito automatico":     "DEBAUT",
+  "fecha del documento":   "CPG_FECHADOC",
+  "tarjeta de debito":     "TARJDEB",
+  "tarjeta de débito":     "TARJDEB",
+  "transferencia bancaria":"Transferencia",
+  "transferencia":         "Transferencia",
+};
+
+function resolverCondicionPagoCod(nombre) {
+  if (!nombre) return null;
+  return CONDICION_PAGO_MAP[nombre.toLowerCase().trim()] || null;
+}
+
+function extraerCodigoProd(raw) {
+  if (!raw) return "";
+  const match = String(raw).trim().match(/^(\d+)/);
+  return match ? match[1] : String(raw).trim();
+}
+
+async function getFinnToken() {
+  const url = `${FINN_TOKEN_URL}?grant_type=client_credentials&client_id=${FINN_CLIENT_ID}&client_secret=${FINN_CLIENT_SECRET}`;
+  const res = await fetch(url);
+  const txt = await res.text();
+  const token = txt.replace(/"/g, "").trim();
+  if (!token) throw new Error("No se pudo obtener token de Finnegans");
+  return token;
+}
+
+exports.despacharEnFinnegans = onCall({ region: "us-central1" }, async (request) => {
+  // Solo usuarios autenticados
+  if (!request.auth) throw new HttpsError("unauthenticated", "No autenticado");
+
+  const { pedidoId, modoTest = true } = request.data;
+  if (!pedidoId) throw new HttpsError("invalid-argument", "Falta pedidoId");
+
+  // 1. Leer pedido de Firestore
+  const pedidoSnap = await db.collection("pedidos").doc(pedidoId).get();
+  if (!pedidoSnap.exists) throw new HttpsError("not-found", `Pedido ${pedidoId} no encontrado`);
+  const pedido = pedidoSnap.data();
+
+  // 2. Validar campos mínimos
+  const clienteRUT       = pedido.clienteRUT;
+  const condicionPagoCod = pedido.condicionPagoCod || resolverCondicionPagoCod(pedido.condicionPago);
+  const depositoApp      = pedido.deposito;
+  const depositoCod      = DEPOSITO_CODIGOS[depositoApp];
+  const productos        = Array.isArray(pedido.productos) ? pedido.productos : [];
+  const fecha            = new Date().toISOString().slice(0, 10); // hoy YYYY-MM-DD
+
+  if (!clienteRUT)       throw new HttpsError("failed-precondition", "Falta clienteRUT en el pedido");
+  if (!condicionPagoCod) throw new HttpsError("failed-precondition", `No se pudo resolver condición de pago: "${pedido.condicionPago}"`);
+  if (!depositoCod)      throw new HttpsError("failed-precondition", `Depósito desconocido: "${depositoApp}"`);
+  if (productos.length === 0) throw new HttpsError("failed-precondition", "El pedido no tiene productos");
+
+  // 3. Armar items
+  const items = productos.map(it => ({
+    ProductoCodigo:       extraerCodigoProd(it.cod),
+    Cantidad:             it.cant ?? it.cantidad ?? 0,
+    Precio:               it.precioUSD ?? 0,
+    Importe:              0,                          // Finnegans lo recalcula
+    IdentificacionExterna: "",
+    PrecioBase:           it.precioUSD ?? 0,
+    PrecioTipo:           0,
+    DepositoOrigenCodigo: depositoCod,
+    vinculacionOrigen:    pedidoId,                   // ej: "PEDVTA - 18672"
+    PartidaNumero:        null,
+    PartidaFechaVto:      null,
+    NumeroSerie:          "",
+    DimensionDistribucion: [{
+      dimensionCodigo:    "DIMCTC",
+      distribucionCodigo: "",
+      tipoCalculo:        "0",
+      distribucionItems:  [{ codigo: "CC03", porcentaje: 100, importe: 0 }]
+    }]
+  }));
+
+  // 4. Armar payload completo
+  const payload = {
+    IdentificacionExterna:    pedidoId,
+    Fecha:                    fecha,
+    Cliente:                  clienteRUT,
+    CondicionPagoCodigo:      condicionPagoCod,
+    NumeroDocumento:          "",               // Finnegans lo genera solo
+    TransaccionTipoCodigo:    "OPER",
+    TransaccionSubtipoCodigo: "REMVTA",
+    WorkflowCodigo:           "VENTAS",
+    Descripcion:              "",
+    EmpresaCodigo:            FINN_EMPRESA_COD,
+    Nombre:                   "",
+    Items:                    items,
+  };
+
+  logger.info(`[despacharEnFinnegans] pedido=${pedidoId} deposito=${depositoCod} items=${items.length} modoTest=${modoTest}`);
+
+  // 5. Si es modo test, devolver el payload sin llamar a Finnegans
+  if (modoTest) {
+    return {
+      modoTest: true,
+      mensaje: "Payload listo — NO se envió a Finnegans (modoTest=true)",
+      payload,
+    };
+  }
+
+  // 6. Llamar a Finnegans
+  const token = await getFinnToken();
+  const url   = `${FINN_API_BASE}/despachoVenta?ACCESS_TOKEN=${encodeURIComponent(token)}`;
+  const res   = await fetch(url, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(payload),
+  });
+  const txt = await res.text();
+  let respuesta;
+  try { respuesta = JSON.parse(txt); } catch { respuesta = txt; }
+
+  if (!res.ok || respuesta?.status !== 200) {
+    logger.error("[despacharEnFinnegans] Error Finnegans:", respuesta);
+    throw new HttpsError("internal", `Finnegans rechazó el despacho: ${JSON.stringify(respuesta)}`);
+  }
+
+  // 7. Guardar el número de remito generado en Firestore
+  await db.collection("pedidos").doc(pedidoId).update({
+    remitoCodigo:   respuesta.documento,
+    remitoId:       respuesta.id,
+    despachado_finnegans_at: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  logger.info(`[despacharEnFinnegans] Remito creado: ${respuesta.documento}`);
+  return {
+    modoTest:  false,
+    remito:    respuesta.documento,
+    remitoId:  respuesta.id,
+    mensaje:   `Despacho creado en Finnegans: ${respuesta.documento}`,
+  };
+});
