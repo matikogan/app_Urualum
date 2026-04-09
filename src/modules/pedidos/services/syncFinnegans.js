@@ -224,6 +224,14 @@ export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = false 
     }
 
     const acc = pedidosMap.get(p.id);
+
+    // Campos de nivel pedido: tomamos de la primera fila que los tenga
+    if (!acc.clienteRUT      && p.clienteRUT)      acc.clienteRUT      = p.clienteRUT;
+    if (!acc.condicionPago   && p.condicionPago)   acc.condicionPago   = p.condicionPago;
+    if (!acc.condicionPagoCod && p.condicionPagoCod) acc.condicionPagoCod = p.condicionPagoCod;
+    if (!acc.cotizacion      && p.cotizacion)      acc.cotizacion      = p.cotizacion;
+    if (!acc.moneda          && p.moneda)          acc.moneda          = p.moneda;
+
     // Cada fila suele traer 1 item
     const item = (p.productos && p.productos[0]) ? { ...p.productos[0] } : null;
     if (!item) continue;
@@ -245,6 +253,9 @@ export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = false 
       // sumamos cantidad respetando la key original de cantidad
       const kQty = getQtyKey(acc.productos[idx]) || qtyKey;
       acc.productos[idx][kQty] = Number(acc.productos[idx][kQty] || 0) + Number(item[qtyKey] || 0);
+      // actualizamos precios si no los teníamos
+      if (!acc.productos[idx].precioUSD && item.precioUSD) acc.productos[idx].precioUSD = item.precioUSD;
+      if (!acc.productos[idx].precioUYU && item.precioUYU) acc.productos[idx].precioUYU = item.precioUYU;
     } else {
       // empujamos el item con su forma original
       // normalizamos cantidad a número

@@ -136,10 +136,31 @@ export function mapFinDocToPedido(fin) {
   } = parseDescripcionPedido(descripcion);
 
 
-  // 4) Producto y cantidad (viene por fila)
-  const prodCod = String(fin.PRODUCTO || fin.Producto || fin.ProductoCodigo || "").trim();
+  // 4) Producto, cantidad y precio (viene por fila — una fila = un ítem)
+  const prodCod  = String(fin.PRODUCTO || fin.Producto || fin.ProductoCodigo || "").trim();
   const prodCant = Number(fin.CANTIDAD ?? fin.Cantidad ?? 0);
-  const productos = prodCod ? [{ cod: prodCod, cant: prodCant || 0 }] : [];
+
+  // Precio en moneda secundaria (USD) y principal (UYU)
+  const prodPrecioUSD = Number(fin.PRECIO ?? fin.PRECIOMONSECUNDARIA ?? fin.Precio ?? 0);
+  const prodPrecioUYU = Number(fin.PRECIOMONPRINCIPAL ?? 0);
+  const prodImporteUSD = Number(fin.IMPORTEMONSECUNDARIA ?? fin.IMPORTE ?? fin.Importe ?? 0);
+  const prodImporteUYU = Number(fin.IMPORTEMONPRINCIPAL ?? 0);
+
+  const productos = prodCod ? [{
+    cod:         prodCod,
+    cant:        prodCant || 0,
+    precioUSD:   prodPrecioUSD || null,
+    precioUYU:   prodPrecioUYU || null,
+    importeUSD:  prodImporteUSD || null,
+    importeUYU:  prodImporteUYU || null,
+  }] : [];
+
+  // 5) Datos de pago y cliente (nivel pedido — tomamos de la primera fila)
+  const condicionPago     = String(fin.CONDICIONPAGO || fin.CondicionPago || "").trim() || null;
+  const condicionPagoCod  = String(fin.CONDICIONPAGOCODIGO || fin.CondicionPagoCodigo || "").trim() || null;
+  const clienteRUT        = String(fin.NRODEIDENTIFICACION || fin.NroDeIdentificacion || fin.RUT || "").trim() || null;
+  const cotizacion        = Number(fin.COTIZACION ?? fin.Cotizacion ?? 0) || null;
+  const moneda            = String(fin.MONEDA || fin.Moneda || "").trim() || null;
 
   const finFecha = parseFinFecha(fin);
 
@@ -147,15 +168,20 @@ export function mapFinDocToPedido(fin) {
       id,
       numero: id,
       cliente,
-      clienteCodigo: clienteCodigo ? String(clienteCodigo).trim() : null,
+      clienteCodigo:   clienteCodigo ? String(clienteCodigo).trim() : null,
+      clienteRUT,
       descripcion,
-      deposito: esCotizacion ? "COTIZACION" : (depParsed || null),
-      metodoEntrega: metParsed || null,
-      agencia: agenciaParsed || null,
+      deposito:        esCotizacion ? "COTIZACION" : (depParsed || null),
+      metodoEntrega:   metParsed || null,
+      agencia:         agenciaParsed || null,
       productos,
-      source: "finnegans",
-      finFecha: finFecha || null,
-      esCotizacion: !!esCotizacion,
+      condicionPago,
+      condicionPagoCod,
+      cotizacion,
+      moneda,
+      source:          "finnegans",
+      finFecha:        finFecha || null,
+      esCotizacion:    !!esCotizacion,
   };
 
 }
