@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { getPedidosPendientes, getDespacho, getResumenStock } from "../API/finnegans";
-import { useApp } from "../context/AppContext";
-import { upsertPedidoDesdeFinnegans } from "../modules/pedidos/services/pedidosFS";
-import { mapFinDocToPedido } from "../modules/pedidos/services/mapFinnegans";
-import { last30DaysRange, today } from "../utils/dates";
+import { getPedidosPendientes, getDespacho, getResumenStock } from "../../../API/finnegans";
+import { useApp } from "../../../context/AppContext";
+import { upsertPedidoDesdeFinnegans } from "../services/pedidosFS";
+import { mapFinDocToPedido } from "../services/mapFinnegans";
+import { last30DaysRange, today } from "../../../utils/dates";
 
 // Campos relevantes para el despacho — queremos verificar que llegan
 const CAMPOS_DESPACHO = [
