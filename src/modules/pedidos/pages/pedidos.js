@@ -558,7 +558,14 @@ export default function PedidosPage() {
 
 
   // ── Config visual por estado ─────────────────────────────────────────────
-  const ESTADO_CONFIG = {
+  const ESTADO_CONFIG_ISABELA = {
+    PENDIENTE_ASIGNAR: { label: "Pendiente de preparar",            icon: "🕐", color: "#f59e0b", bg: "#fef3c7", border: "#fde68a" },
+    EN_PREPARACION:    { label: "En preparación",                   icon: "⚙️", color: "#8b5cf6", bg: "#f5f3ff", border: "#ddd6fe" },
+    CONTROLADO:        { label: "Preparado — listo para despachar", icon: "✅", color: "#16a34a", bg: "#f0fdf4", border: "#86efac" },
+    DESPACHADO:        { label: "Despachado — pendiente de control", icon: "🚚", color: "#dc2626", bg: "#fef2f2", border: "#fca5a5" },
+  };
+
+  const ESTADO_CONFIG_DEFAULT = {
     PENDIENTE_ASIGNAR: { label: "Pendiente de asignar",    icon: "🕐", color: "#f59e0b", bg: "#fef3c7", border: "#fde68a" },
     ASIGNADO:          { label: "Asignado",                icon: "👤", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
     EN_PREPARACION:    { label: "En preparación",          icon: "⚙️", color: "#8b5cf6", bg: "#f5f3ff", border: "#ddd6fe" },
@@ -566,6 +573,8 @@ export default function PedidosPage() {
     CONTROLADO:        { label: "Controlado — listo",      icon: "📦", color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
     DESPACHADO:        { label: "Despachados hoy",         icon: "🚚", color: "#475569", bg: "#f8fafc", border: "#e2e8f0" },
   };
+
+  const ESTADO_CONFIG = isEncargadoIsabela ? ESTADO_CONFIG_ISABELA : ESTADO_CONFIG_DEFAULT;
 
   // ── Urgencia según fecha del pedido ──────────────────────────────────────
   function getUrgencia(p) {
