@@ -47,6 +47,8 @@ export default function ConfirmarDespacho({ pedidoId, onDone }) {
         ...data,
         estado: "DESPACHADO",
         ...(data.metodoEntrega === "AGENCIA" && agencia ? { agencia } : {}),
+        // ISABELA: marcar para control físico antes de la entrega al cliente
+        ...(data.deposito === "ISABELA" ? { necesitaControl: true } : {}),
         despachadoAt: serverTimestamp(),
         despachadoPor: user?.uid || null,
         movedAt: serverTimestamp(),

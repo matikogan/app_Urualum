@@ -372,6 +372,8 @@ export default function PedidoDetalle() {
   // Cuando el encargado se auto-asignó, actúa como operario en prep.
   // (definido después de pedido para evitar temporal dead zone)
   const isSelfAssigned = !!pedido?.operarioId && pedido.operarioId === user?.uid;
+  // ISABELA: encargado único que hace todo
+  const isIsabela = isEncargado && profile?.deposito === "ISABELA";
 
   // selector de operario
   const [operarios, setOperarios] = useState([]);
@@ -703,6 +705,30 @@ const filteredOperarios = useMemo(() => {
     }
   }
 
+  // ISABELA: un click → auto-asignar + EN_PREPARACION (salta ASIGNADO)
+  async function handleTomarYPreparar() {
+    if (!isIsabela) return;
+    try {
+      setSaving(true);
+      const nombre = profile?.nombre || user?.displayName || user?.email || "Encargado";
+      await asignarOperario(id, user.uid, nombre);
+      await updateEstado(id, ESTADOS.EN_PREPARACION);
+      haptics?.success?.();
+      toast.success("Pedido tomado — a preparar!");
+      setPedido(prev => prev ? {
+        ...prev,
+        operarioId: user.uid,
+        operarioNombre: nombre,
+        estado: ESTADOS.EN_PREPARACION,
+      } : prev);
+    } catch (e) {
+      console.error(e);
+      toast.error(e.message || "No se pudo tomar el pedido");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function onComenzar() {
     try {
       setSaving(true);
@@ -774,6 +800,55 @@ const filteredOperarios = useMemo(() => {
         </div>
       );
     };
+
+    // ── ISABELA: vista simplificada — un solo botón "Tomar y preparar" ──────
+    if (isIsabela) {
+      return (
+        <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "88px" }}>
+          <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+            <VolverListaPedidos to="/pedidos" />
+            <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+              <div>
+                <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Pedido #{pedido.numero || id}</p>
+                <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>{pedido.cliente || "—"}</h1>
+              </div>
+              <span style={{ flexShrink: 0, background: "#fef3c7", color: "#92400e", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>PENDIENTE</span>
+            </div>
+            <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📅 {pedido.finFecha}</span>}
+              {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🚚 {pedido.metodoEntrega}</span>}
+            </div>
+          </div>
+          <div style={{ padding: "16px" }}>
+            <p style={{ margin: "0 0 10px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+              Productos · {productos.length} ítem{productos.length !== 1 ? "s" : ""}
+            </p>
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "4px 16px", marginBottom: "20px" }}>
+              {productos.map((it, i) => {
+                const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                const nombre = it.descripcion || it.desc || it.nombre || it.cod || "—";
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                    <p style={{ flex: 1, margin: 0, fontSize: "0.88rem", color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                    <span style={{ flexShrink: 0, background: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: "0.82rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 16px 20px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)" }}>
+            <button
+              type="button"
+              onClick={handleTomarYPreparar}
+              disabled={saving}
+              style={{ width: "100%", padding: "16px", borderRadius: "14px", border: "none", fontWeight: 700, fontSize: "1.05rem", background: saving ? "#e2e8f0" : "#16a34a", color: saving ? "#94a3b8" : "#fff", cursor: saving ? "not-allowed" : "pointer" }}
+            >
+              {saving ? "Tomando pedido…" : "🟢 Tomar y preparar"}
+            </button>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "88px" }}>
@@ -2304,11 +2379,13 @@ const filteredOperarios = useMemo(() => {
           pedido={pedido}
           productos={productos}
           catalogIndex={catalogoMap}                  // mapa { codUru -> {customerNo, finish, ...} }
-          onPreparacionFinalizada={async () => {      // qué hacer cuando se termina
+          onPreparacionFinalizada={async () => {
             try {
-              await updateEstado(id, ESTADOS.PREPARADO);
-              setPedido(prev => prev ? { ...prev, estado: ESTADOS.PREPARADO } : prev);
-              toast.success("Pedido preparado");
+              // ISABELA: encargado auto-asignado → salta PREPARADO, va directo a CONTROLADO
+              const nextEstado = (isIsabela && isSelfAssigned) ? ESTADOS.CONTROLADO : ESTADOS.PREPARADO;
+              await updateEstado(id, nextEstado);
+              setPedido(prev => prev ? { ...prev, estado: nextEstado } : prev);
+              toast.success(nextEstado === ESTADOS.CONTROLADO ? "Listo para despacho ✓" : "Pedido preparado");
             } catch (e) {
               toast.error(e?.message || "No se pudo finalizar la preparación");
             }

@@ -10,7 +10,7 @@ import { norm } from "utils/text"
 import Badge from "../components/Badge";
 import useNotificationSound from "hooks/useNotificationSound"; // ajustá la ruta
 
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, onSnapshot, query, where, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../../firebase";
 
 
@@ -178,6 +178,10 @@ export default function PedidosPage() {
 
   const isEncargado = (profile?.rol || "").toLowerCase() === "encargado";
   const isVentas = (profile?.rol || "").toLowerCase() === "ventas";
+  const isEncargadoIsabela = isEncargado && profile?.deposito === "ISABELA";
+
+  // ISABELA: pedidos despachados pendientes de control físico
+  const [porControlar, setPorControlar] = useState([]);
 
 
   const { play: playNotif, enabled: soundOn, setEnabled: setSoundOn, unlock } =
@@ -256,8 +260,19 @@ export default function PedidosPage() {
     return () => unsub();
   }, []);
 
-
-
+  /* ---------- listener: pendientes de control físico (solo ISABELA) ---------- */
+  useEffect(() => {
+    if (!isEncargadoIsabela) return;
+    const q = query(
+      collection(db, "pedidos_despachados"),
+      where("necesitaControl", "==", true),
+      where("deposito", "==", "ISABELA")
+    );
+    const unsub = onSnapshot(q, snap => {
+      setPorControlar(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => console.error("[porControlar]", err));
+    return () => unsub();
+  }, [isEncargadoIsabela]);
 
   // listener a Firestore (por depósito y método)
   useEffect(() => {
@@ -757,6 +772,21 @@ export default function PedidosPage() {
     );
   }
 
+  // ── Control físico ISABELA ────────────────────────────────────────────────
+  async function marcarControlado(pedidoId) {
+    try {
+      await updateDoc(doc(db, "pedidos_despachados", pedidoId), {
+        necesitaControl: false,
+        controlFisicoAt: serverTimestamp(),
+        controladoPor: user?.uid || null,
+      });
+      toast.success("Control registrado ✓");
+    } catch (e) {
+      console.error(e);
+      toast.error("No se pudo registrar el control");
+    }
+  }
+
   // ── Render principal ──────────────────────────────────────────────────────
   return (
     <div style={{ background: "#f8fafc", minHeight: "100vh" }}>
@@ -880,6 +910,35 @@ export default function PedidosPage() {
 
       {/* ── Contenido ── */}
       <div style={{ padding: "10px 10px 80px" }}>
+
+        {/* ── ISABELA: pendientes de control físico ── */}
+        {isEncargadoIsabela && porControlar.length > 0 && (
+          <div style={{ marginBottom: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+              <span style={{ fontSize: "0.67rem", fontWeight: 700, color: "#dc2626", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                🔴 Pendiente de control
+              </span>
+              <span style={{ background: "#dc2626", color: "#fff", fontSize: "0.65rem", fontWeight: 700, padding: "2px 8px", borderRadius: "999px" }}>
+                {porControlar.length}
+              </span>
+            </div>
+            {porControlar.map(p => (
+              <div key={p.id} style={{ background: "#fff", border: "1.5px solid #fca5a5", borderLeft: "4px solid #dc2626", borderRadius: "12px", padding: "12px 14px", marginBottom: "8px", display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>#{p.numero || p.id}</p>
+                  <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.cliente || "—"}</p>
+                  {p.metodoEntrega && <span style={{ fontSize: "0.7rem", color: "#64748b" }}>🚚 {p.metodoEntrega}</span>}
+                </div>
+                <button
+                  onClick={() => marcarControlado(p.id)}
+                  style={{ flexShrink: 0, padding: "9px 14px", background: "#16a34a", border: "none", borderRadius: "10px", color: "#fff", fontWeight: 700, fontSize: "0.82rem", cursor: "pointer" }}
+                >
+                  ✅ Controlado
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {loadingPedidos && (
           <div style={{ textAlign: "center", padding: "48px 0", color: "#94a3b8", fontSize: "0.9rem" }}>
