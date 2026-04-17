@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { useApp } from "../../../context/AppContext";
-import { getPedido, asignarOperario, updateEstado } from "../services/pedidosFS";
+import { getPedido, asignarOperario, updateEstado, cancelarPedido } from "../services/pedidosFS";
 import { ESTADOS } from "../services/estados";
 import { getFlag } from "../services/featureFlags";
 import { db } from "../../../firebase";
@@ -67,6 +67,8 @@ function EncPreparacionPanel({
   catalogIndex,            // índice { codUru -> {customerNo, finish, ...} } si ya lo traés
   onClose,                 // si querés volver atrás
   onPreparacionFinalizada, // callback para cuando se termina (cambia estado)
+  btnFinalizarLabel,       // etiqueta personalizada para el botón final
+  onReportarError,         // async (detalle: string) => void — reporta error y cambia estado
 }) {
   const { featureFlags } = useApp();
   const lite = featureFlags?.MODO_LITE !== false;
@@ -77,6 +79,12 @@ function EncPreparacionPanel({
   const [scanForKey, setScanForKey] = React.useState(null);
   const [modalPack, setModalPack] = React.useState(null);   // {key, packSize, remain}
   const [modalError, setModalError] = React.useState(null); // {title, message}
+  const [showErrPanel, setShowErrPanel]     = React.useState(false);
+  const [errProductos, setErrProductos]     = React.useState([]);        // [{ key, cod, nombre, tipo, cant }]
+  const [expandedProdKey, setExpandedProdKey] = React.useState(null);    // key del producto expandido
+  const [pendingTipo, setPendingTipo]       = React.useState(null);
+  const [pendingCant, setPendingCant]       = React.useState("");
+  const [savingErr, setSavingErr]           = React.useState(false);
 
 
 
@@ -242,29 +250,260 @@ function EncPreparacionPanel({
       {(productos || []).map((it, i) => lite ? renderItemLite(it, i) : renderItemFull(it, i))}
 
       {/* Acciones finales */}
-      {lite ? (
-        <div className="mt-3 flex gap-2">
-          <button className="btn btn--outline flex-1" onClick={marcarTodo}>Marcar todo</button>
-          <button className="btn flex-1 bg-black text-white disabled:opacity-60" disabled={!allChecked} onClick={onPreparacionFinalizada}>
-            Finalizar preparación
-          </button>
-        </div>
-      ) : (
-        <div className="mt-3">
+      {/* Espaciador para que el contenido no quede tapado por la barra fija */}
+      <div style={{ height: lite ? (allChecked ? 120 : 160) : 120 }} />
+
+      {/* ── Barra fija inferior ── */}
+      <div style={{
+        position: "fixed", bottom: 0, left: 0, right: 0,
+        background: "#fff",
+        borderTop: "1px solid #e2e8f0",
+        boxShadow: "0 -4px 16px rgba(0,0,0,0.08)",
+        padding: "10px 16px 20px",
+        display: "flex", flexDirection: "column", gap: 8,
+        zIndex: 50,
+      }}>
+        {lite ? (
+          <>
+            {!allChecked && (productos || []).length > 0 && (
+              <p style={{ margin: 0, fontSize: "0.78rem", color: "#b45309", background: "#fef9c3", borderRadius: 8, padding: "5px 10px", textAlign: "center" }}>
+                Tildar todos los ítems para continuar
+              </p>
+            )}
+            {!allChecked && (
+              <button
+                onClick={marcarTodo}
+                style={{
+                  background: "transparent", border: "1.5px solid #cbd5e1", borderRadius: 10,
+                  padding: "7px 0", fontSize: "0.82rem", fontWeight: 600, color: "#475569",
+                  cursor: "pointer", width: "100%",
+                }}
+              >
+                Marcar todo
+              </button>
+            )}
+            <button
+              disabled={!allChecked}
+              onClick={onPreparacionFinalizada}
+              style={{
+                background: allChecked ? "#0f172a" : "#e2e8f0",
+                color: allChecked ? "#fff" : "#94a3b8",
+                border: "none", borderRadius: 14,
+                padding: "16px 0", width: "100%",
+                fontSize: "1.05rem", fontWeight: 700,
+                cursor: allChecked ? "pointer" : "not-allowed",
+                transition: "background 0.15s",
+              }}
+            >
+              {btnFinalizarLabel || "Pedido completado"}
+            </button>
+          </>
+        ) : (
           <button
-            className="btn w-full bg-black text-white"
+            style={{
+              background: "#0f172a", color: "#fff",
+              border: "none", borderRadius: 14,
+              padding: "16px 0", width: "100%",
+              fontSize: "1.05rem", fontWeight: 700,
+              cursor: "pointer",
+            }}
             onClick={async () => {
               try {
-                // Reutilizá acá la misma confirmación que usa Operario
-                await confirmarPedidoConStock({ pedido, prep }); // mismo helper que tengas en Operario
+                await confirmarPedidoConStock({ pedido, prep });
                 onPreparacionFinalizada();
               } catch (e) {
                 setModalError({ title: "Error", message: e?.message || "No se pudo finalizar" });
               }
             }}
           >
-            Finalizar preparación
+            {btnFinalizarLabel || "Finalizar preparación"}
           </button>
+        )}
+
+        {/* Botón de error — siempre visible durante preparación */}
+        {onReportarError && (
+          <button
+            onClick={() => setShowErrPanel(true)}
+            style={{
+              background: "none", border: "none",
+              color: "#dc2626", fontSize: "0.82rem", fontWeight: 600,
+              cursor: "pointer", padding: "2px 0", textAlign: "center",
+              textDecoration: "underline", textDecorationColor: "#fca5a5",
+            }}
+          >
+            ⚠️ Hay un problema con este pedido
+          </button>
+        )}
+      </div>
+
+      {/* ── Overlay: reportar error ── */}
+      {showErrPanel && (
+        <div
+          onClick={() => { setShowErrPanel(false); setErrProductos([]); setExpandedProdKey(null); setPendingTipo(null); setPendingCant(""); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200, display: "flex", alignItems: "flex-end" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: "#fff", width: "100%",
+              borderRadius: "20px 20px 0 0",
+              padding: "20px 16px 32px",
+            }}
+          >
+            <div style={{ width: "36px", height: "4px", background: "#e2e8f0", borderRadius: "999px", margin: "0 auto 18px" }} />
+            <h3 style={{ margin: "0 0 4px", fontSize: "1rem", fontWeight: 800, color: "#0f172a" }}>⚠️ Reportar problema</h3>
+            <p style={{ margin: "0 0 16px", fontSize: "0.82rem", color: "#64748b" }}>
+              Seleccioná los productos con problema. El pedido pasará a "Con error" y ventas será notificado.
+            </p>
+
+            <p style={{ margin: "0 0 8px", fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Productos con problema
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "16px" }}>
+              {(productos || []).map((it, idx) => {
+                const nombre = it.descripcion || it.desc || it.nombre || it.cod || it.codigo || "—";
+                const cant = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                const cod = it.cod || it.codigo || it.codigoURU || "";
+                const prodKey = `${cod}-${idx}`;
+                const confirmed = errProductos.find(p => p.key === prodKey);
+                const isExpanded = expandedProdKey === prodKey;
+                const TIPO_LABELS_SHORT = { sin_stock: "Sin stock", danado: "Dañado", hay_menos: "Hay menos" };
+
+                return (
+                  <div key={prodKey}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirmed) {
+                          setErrProductos(prev => prev.filter(p => p.key !== prodKey));
+                          if (isExpanded) setExpandedProdKey(null);
+                        } else if (isExpanded) {
+                          setExpandedProdKey(null); setPendingTipo(null); setPendingCant("");
+                        } else {
+                          setExpandedProdKey(prodKey); setPendingTipo(null); setPendingCant("");
+                        }
+                      }}
+                      style={{
+                        width: "100%", textAlign: "left", padding: "10px 12px",
+                        borderRadius: confirmed || isExpanded ? "10px 10px 0 0" : "10px",
+                        cursor: "pointer", fontFamily: "inherit",
+                        border: confirmed ? "1.5px solid #ea580c" : isExpanded ? "1.5px solid #f97316" : "1.5px solid #e2e8f0",
+                        background: confirmed ? "#fff7ed" : isExpanded ? "#fff7ed" : "#f8fafc",
+                        display: "flex", alignItems: "center", gap: "8px",
+                      }}
+                    >
+                      <span style={{ flex: 1, fontSize: "0.85rem", fontWeight: confirmed ? 700 : 500, color: confirmed ? "#9a3412" : "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {nombre}
+                      </span>
+                      <span style={{ fontSize: "0.78rem", color: "#94a3b8", flexShrink: 0 }}>x{cant}</span>
+                      {confirmed ? (
+                        <span style={{ fontSize: "0.68rem", fontWeight: 700, padding: "2px 8px", borderRadius: "999px", background: "#ea580c", color: "#fff", flexShrink: 0, whiteSpace: "nowrap" }}>
+                          {confirmed.tipo === "hay_menos" && confirmed.cant ? `Hay menos (${confirmed.cant})` : TIPO_LABELS_SHORT[confirmed.tipo] || confirmed.tipo} ✕
+                        </span>
+                      ) : (
+                        <span style={{ color: isExpanded ? "#f97316" : "#94a3b8", fontSize: "0.9rem", flexShrink: 0 }}>{isExpanded ? "▲" : "+"}</span>
+                      )}
+                    </button>
+
+                    {isExpanded && !confirmed && (
+                      <div style={{ border: "1.5px solid #f97316", borderTop: "none", borderRadius: "0 0 10px 10px", background: "#fff7ed", padding: "12px" }}>
+                        <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#c2410c", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          ¿Cuál es el problema?
+                        </p>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                          {[
+                            { id: "sin_stock", label: "No hay stock",           icon: "❌" },
+                            { id: "danado",    label: "Está dañado / abollado", icon: "💢" },
+                            { id: "hay_menos", label: "Hay menos de lo pedido", icon: "📉" },
+                          ].map(op => (
+                            <button
+                              key={op.id} type="button"
+                              onClick={() => { setPendingTipo(op.id); if (op.id !== "hay_menos") setPendingCant(""); }}
+                              style={{
+                                width: "100%", textAlign: "left", padding: "9px 12px",
+                                borderRadius: "8px", cursor: "pointer", fontFamily: "inherit",
+                                border: pendingTipo === op.id ? "1.5px solid #dc2626" : "1.5px solid #fdba74",
+                                background: pendingTipo === op.id ? "#fef2f2" : "#fff",
+                                display: "flex", alignItems: "center", gap: "8px",
+                              }}
+                            >
+                              <span>{op.icon}</span>
+                              <span style={{ flex: 1, fontSize: "0.85rem", fontWeight: pendingTipo === op.id ? 700 : 500, color: pendingTipo === op.id ? "#991b1b" : "#475569" }}>{op.label}</span>
+                              {pendingTipo === op.id && <span>✓</span>}
+                            </button>
+                          ))}
+                        </div>
+
+                        {pendingTipo === "hay_menos" && (
+                          <div style={{ marginTop: "10px" }}>
+                            <p style={{ margin: "0 0 4px", fontSize: "0.7rem", fontWeight: 700, color: "#c2410c", textTransform: "uppercase" }}>¿Cuántas hay? (opcional)</p>
+                            <input
+                              type="number" min="0" value={pendingCant}
+                              onChange={e => setPendingCant(e.target.value)}
+                              placeholder="0"
+                              style={{ width: "100%", boxSizing: "border-box", border: "1.5px solid #fdba74", borderRadius: "8px", padding: "8px 10px", fontSize: "0.95rem", outline: "none", fontFamily: "inherit" }}
+                            />
+                          </div>
+                        )}
+
+                        <button
+                          type="button"
+                          disabled={!pendingTipo}
+                          onClick={() => {
+                            if (!pendingTipo) return;
+                            setErrProductos(prev => [...prev, { key: prodKey, cod, nombre, tipo: pendingTipo, cant: pendingCant }]);
+                            setExpandedProdKey(null); setPendingTipo(null); setPendingCant("");
+                          }}
+                          style={{
+                            marginTop: "10px", width: "100%", padding: "10px",
+                            borderRadius: "8px", border: "none", fontFamily: "inherit",
+                            background: pendingTipo ? "#ea580c" : "#e2e8f0",
+                            color: pendingTipo ? "#fff" : "#94a3b8",
+                            fontWeight: 700, fontSize: "0.88rem",
+                            cursor: pendingTipo ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          Confirmar problema →
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button
+                onClick={() => { setShowErrPanel(false); setErrProductos([]); setExpandedProdKey(null); setPendingTipo(null); setPendingCant(""); }}
+                style={{ flex: 1, padding: "13px", borderRadius: "12px", border: "1.5px solid #e2e8f0", background: "#f8fafc", color: "#64748b", fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
+              <button
+                disabled={savingErr || errProductos.length === 0}
+                onClick={async () => {
+                  setSavingErr(true);
+                  try {
+                    await onReportarError({ productos: errProductos });
+                    setShowErrPanel(false);
+                    setErrProductos([]); setExpandedProdKey(null); setPendingTipo(null); setPendingCant("");
+                  } finally {
+                    setSavingErr(false);
+                  }
+                }}
+                style={{
+                  flex: 2, padding: "13px", borderRadius: "12px", border: "none",
+                  background: savingErr || errProductos.length === 0 ? "#e2e8f0" : "#dc2626",
+                  color: savingErr || errProductos.length === 0 ? "#94a3b8" : "#fff",
+                  fontWeight: 700, fontSize: "0.9rem",
+                  cursor: savingErr || errProductos.length === 0 ? "not-allowed" : "pointer",
+                }}
+              >
+                {savingErr ? "Enviando…" : `Reportar${errProductos.length > 0 ? ` (${errProductos.length})` : ""} y notificar`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -404,8 +643,22 @@ export default function PedidoDetalle() {
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const [savingAnulacion, setSavingAnulacion] = useState(false);
 
+  // Estados para el modal de cancelación (ventas)
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelStep, setCancelStep] = useState(1); // 1=elegir motivo, 2=confirmar
+  const [cancelMotivo, setCancelMotivo] = useState("");
+  const [cancelOtroText, setCancelOtroText] = useState("");
+  const [canceling, setCanceling] = useState(false);
 
 
+
+
+  // ISABELA: si el pedido está DESPACHADO en la colección pedidos, redirigir al control de entrega
+  useEffect(() => {
+    if (isIsabela && pedido?.estado === "DESPACHADO") {
+      navigate(`/encargado/entrega/${id}`, { replace: true });
+    }
+  }, [isIsabela, pedido?.estado, id, navigate]);
 
   // resetear checks cuando cambia el pedido
   useEffect(() => {
@@ -459,6 +712,21 @@ export default function PedidoDetalle() {
     }
   }
 
+  async function handleCancelar() {
+    const motivo = cancelMotivo === "Otro" ? cancelOtroText.trim() : cancelMotivo;
+    if (!motivo) return;
+    setCanceling(true);
+    try {
+      await cancelarPedido(pedido.id, motivo, user?.uid);
+      toast.success("Pedido cancelado");
+      navigate("/pedidos");
+    } catch (e) {
+      toast.error("No se pudo cancelar: " + e.message);
+    } finally {
+      setCanceling(false);
+    }
+  }
+
   async function confirmControl() {
   try {
     await updateDoc(doc(db, "pedidos", id), {
@@ -473,14 +741,23 @@ export default function PedidoDetalle() {
 }
 
 
-  async function submitErrorPreparacion() {
-    if (!detalleErr.trim()) {
-      toast.error("Escribí el detalle del error.");
+  async function submitErrorPreparacion(productosConError) {
+    if (!Array.isArray(productosConError) || productosConError.length === 0) {
+      toast.error("Seleccioná al menos un producto con error.");
       return;
     }
     try {
       setSavingErr(true);
+      const TIPO_LABELS = { sin_stock: "No hay stock", danado: "Está dañado / abollado", hay_menos: "Hay menos de lo pedido" };
+      const detalleText = productosConError.map(p => {
+        const label = TIPO_LABELS[p.tipo] || p.tipo;
+        const cantStr = p.tipo === "hay_menos" && p.cant ? ` (disponibles: ${p.cant})` : "";
+        return `• ${p.nombre}: ${label}${cantStr}`;
+      }).join("\n");
+
       const respNombre = profile?.nombre || user?.displayName || user?.email || "—";
+      const prodsClean = productosConError.map(({ key, ...rest }) => rest); // quitar key interna
+
       await addDoc(collection(db, "errores_preparacion"), {
         pedidoId: id,
         numero: pedido.numero || null,
@@ -491,12 +768,22 @@ export default function PedidoDetalle() {
         estadoPedido: pedido.estado || null,
         finFecha: pedido.finFecha || null,
         metodoEntrega: pedido.metodoEntrega || null,
-        detalle: detalleErr.trim(),
+        detalle: detalleText,
+        errorProductos: prodsClean,
+        errorProductoCod: prodsClean[0]?.cod || null,
+        errorProductoNombre: prodsClean[0]?.nombre || null,
         fechaReporte: serverTimestamp(),
       });
-      setShowErrForm(false);
-      setDetalleErr("");
-      toast.success("Error registrado");
+
+      await updateEstado(id, ESTADOS.CON_ERROR, {
+        errorDetalle: detalleText,
+        errorProductos: prodsClean,
+        errorProductoCod: prodsClean[0]?.cod || null,
+        errorProductoNombre: prodsClean[0]?.nombre || null,
+      });
+
+      toast.success("Error reportado — ventas fue notificado");
+      navigate("/pedidos");
     } catch (e) {
       console.error(e);
       toast.error(e.message || "No se pudo registrar el error");
@@ -843,7 +1130,7 @@ const filteredOperarios = useMemo(() => {
               disabled={saving}
               style={{ width: "100%", padding: "16px", borderRadius: "14px", border: "none", fontWeight: 700, fontSize: "1.05rem", background: saving ? "#e2e8f0" : "#16a34a", color: saving ? "#94a3b8" : "#fff", cursor: saving ? "not-allowed" : "pointer" }}
             >
-              {saving ? "Tomando pedido…" : "🟢 Tomar y preparar"}
+              {saving ? "Iniciando…" : "🟢 Comenzar preparación"}
             </button>
           </div>
         </div>
@@ -1892,6 +2179,152 @@ const filteredOperarios = useMemo(() => {
   }
   // ── Fin vista CONTROLADO encargado ────────────────────────────────────────
 
+  // ── Vista CON_ERROR — VENTAS ──────────────────────────────────────────────
+  if (pedido.estado === ESTADOS.CON_ERROR && isVentas) {
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+    const TIPO_LABELS = { sin_stock: "No hay stock", danado: "Dañado / abollado", hay_menos: "Hay menos de lo pedido" };
+
+    // Usar errorProductos (nuevo) o construir desde campos legacy
+    const errorProds = Array.isArray(pedido.errorProductos) && pedido.errorProductos.length > 0
+      ? pedido.errorProductos
+      : pedido.errorProductoNombre
+        ? [{ cod: pedido.errorProductoCod || null, nombre: pedido.errorProductoNombre, tipo: null }]
+        : [];
+
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      return isNaN(d) ? f : d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+    };
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh" }}>
+        {/* ── Header ── */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "14px 20px", position: "sticky", top: 0, zIndex: 10 }}>
+          <div style={{ maxWidth: "860px", margin: "0 auto", display: "flex", alignItems: "center", gap: "12px" }}>
+            <button
+              onClick={() => navigate("/ventas/para-despachar")}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "34px", height: "34px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem", flexShrink: 0 }}
+            >
+              ←
+            </button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: "0.72rem", color: "#94a3b8" }}>
+                Pedido #{pedido.numero || id}
+              </p>
+              <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {pedido.cliente || "—"}
+              </p>
+            </div>
+            <span style={{ background: "#fff7ed", border: "1.5px solid #fed7aa", borderRadius: "999px", padding: "4px 12px", fontSize: "0.72rem", fontWeight: 700, color: "#ea580c", flexShrink: 0 }}>
+              ⚠️ CON ERROR
+            </span>
+          </div>
+        </div>
+
+        <div style={{ maxWidth: "860px", margin: "0 auto", padding: "20px" }}>
+
+          {/* ── Info del pedido ── */}
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 20px", marginBottom: "16px" }}>
+            <h2 style={{ margin: "0 0 4px", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a" }}>
+              #{pedido.numero || id}
+            </h2>
+            <p style={{ margin: "0 0 10px", fontSize: "1rem", color: "#334155" }}>{pedido.cliente || "—"}</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
+              {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🚚 {pedido.metodoEntrega}</span>}
+              {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🏭 {pedido.deposito}</span>}
+            </div>
+          </div>
+
+          {/* ── Banner de error ── */}
+          <div style={{ background: "#fff7ed", border: "1.5px solid #fed7aa", borderRadius: "14px", padding: "16px 20px", marginBottom: "16px" }}>
+            <p style={{ margin: "0 0 6px", fontSize: "0.78rem", fontWeight: 700, color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              ⚠️ Error en preparación
+            </p>
+            <p style={{ margin: 0, fontSize: "0.88rem", color: "#9a3412", lineHeight: 1.5 }}>
+              El encargado detectó problemas con este pedido. Hacé la corrección en Finnegans — cuando se sincronice, el pedido volverá a <strong>Pendiente de preparar</strong> automáticamente.
+            </p>
+          </div>
+
+          {/* ── Lista de productos ── */}
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden", marginBottom: "16px" }}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #f1f5f9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Contenido · {productos.length} producto{productos.length !== 1 ? "s" : ""}
+              </span>
+              {errorProds.length > 0 && (
+                <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#ea580c" }}>
+                  {errorProds.length} con error
+                </span>
+              )}
+            </div>
+
+            {productos.map((it, i) => {
+              const cod = it.cod || it.codigo || it.codigoURU || "";
+              const nombre = it.descripcion || it.desc || it.nombre || cod || "—";
+              const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+              const errInfo = errorProds.find(p =>
+                (p.cod && p.cod === cod) || p.nombre === nombre
+              );
+              const hasError = !!errInfo;
+
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "flex-start", gap: "12px",
+                  padding: "12px 16px",
+                  borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none",
+                  background: hasError ? "#fff7ed" : "#fff",
+                  borderLeft: `4px solid ${hasError ? "#ea580c" : "transparent"}`,
+                  transition: "background 0.1s",
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: hasError ? 700 : 500, color: hasError ? "#9a3412" : "#1e293b" }}>
+                      {hasError && <span style={{ marginRight: "4px" }}>⚠️</span>}
+                      {nombre}
+                    </p>
+                    {hasError && errInfo.tipo && (
+                      <p style={{ margin: "3px 0 0", fontSize: "0.78rem", color: "#c2410c", fontWeight: 600 }}>
+                        {TIPO_LABELS[errInfo.tipo] || errInfo.tipo}
+                        {errInfo.tipo === "hay_menos" && errInfo.cant ? ` · disponibles: ${errInfo.cant}` : ""}
+                      </p>
+                    )}
+                    {hasError && !errInfo.tipo && (
+                      <p style={{ margin: "3px 0 0", fontSize: "0.78rem", color: "#c2410c", fontStyle: "italic" }}>
+                        Producto con error
+                      </p>
+                    )}
+                  </div>
+                  <span style={{
+                    flexShrink: 0, fontWeight: 700, fontSize: "0.82rem",
+                    padding: "3px 9px", borderRadius: "8px",
+                    background: hasError ? "#fed7aa" : "#f1f5f9",
+                    color: hasError ? "#9a3412" : "#475569",
+                  }}>
+                    ×{qty}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── Nota del encargado (si hay) ── */}
+          {pedido.errorDetalle && (
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px" }}>
+              <p style={{ margin: "0 0 6px", fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Nota del encargado
+              </p>
+              <p style={{ margin: 0, fontSize: "0.88rem", color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                {pedido.errorDetalle}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  // ── Fin vista CON_ERROR ventas ─────────────────────────────────────────────
+
   // ── Vista CONTROLADO — VENTAS (detalle completo + despacho) ──────────────
   if (pedido.estado === ESTADOS.CONTROLADO && isVentas) {
     const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
@@ -1926,149 +2359,350 @@ const filteredOperarios = useMemo(() => {
       { key: "CONTROLADO", label: "Controlado" },
     ];
 
+    /* ── helper: lista de productos reutilizable ── */
+    const ProductList = ({ items, accentBg, accentColor, borderColor }) => (
+      <div style={{ background: "#fff", border: `1.5px solid ${borderColor}`, borderRadius: "14px", overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.88rem" }}>
+          <thead>
+            <tr style={{ background: "#f8fafc", borderBottom: `1px solid ${borderColor}` }}>
+              <th style={{ padding: "8px 14px", textAlign: "left", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>Descripción</th>
+              <th style={{ padding: "8px 14px", textAlign: "right", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>Cant.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map(({ it, uru }, i) => {
+              const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+              const color = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
+              const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+              return (
+                <tr key={i} style={{ borderBottom: i < items.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                  <td style={{ padding: "10px 14px", verticalAlign: "middle" }}>
+                    <p style={{ margin: 0, fontWeight: 600, color: "#1e293b" }}>{nombre}</p>
+                    {color && <p style={{ margin: "2px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
+                  </td>
+                  <td style={{ padding: "10px 14px", textAlign: "right", verticalAlign: "middle" }}>
+                    <span style={{ background: accentBg, color: accentColor, fontWeight: 700, fontSize: "0.85rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+
     return (
-      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "88px" }}>
+      <div style={{ background: "#f1f5f9", minHeight: "100vh" }}>
 
-        {/* ── Header ── */}
-        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
-          <VolverListaPedidos to="/ventas/para-despachar" />
-          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
-            <div>
-              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Pedido #{pedido.numero || id}</p>
-              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>{pedido.cliente || "—"}</h1>
+        {/* ── Header sticky ── */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 24px", position: "sticky", top: 0, zIndex: 10 }}>
+          <div style={{ maxWidth: "1200px", margin: "0 auto", display: "flex", alignItems: "center", gap: "14px" }}>
+            <button
+              type="button"
+              onClick={() => navigate("/ventas/pipeline")}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "34px", height: "34px", flexShrink: 0, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem" }}
+            >
+              ←
+            </button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Pedido #{pedido.numero || id}</p>
+              <h1 style={{ margin: "1px 0 0", fontSize: "1.1rem", fontWeight: 800, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pedido.cliente || "—"}</h1>
             </div>
-            <span style={{ flexShrink: 0, background: "#ede9fe", color: "#5b21b6", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>LISTO P/ DESPACHO</span>
-          </div>
-          {/* Metadata chips */}
-          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
-            {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
-            {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🚚 {pedido.metodoEntrega}</span>}
-            {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🏭 {pedido.deposito}</span>}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", flexShrink: 0 }}>
+              {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
+              {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🚚 {pedido.metodoEntrega}</span>}
+              {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🏭 {pedido.deposito}</span>}
+              <span style={{ background: "#ede9fe", color: "#5b21b6", fontSize: "0.68rem", fontWeight: 700, padding: "3px 10px", borderRadius: "999px", letterSpacing: "0.05em" }}>LISTO P/ DESPACHO</span>
+            </div>
           </div>
         </div>
 
-        <div style={{ padding: "16px" }}>
+        {/* ── Layout: main + aside ── */}
+        <div style={{
+          maxWidth: "1200px",
+          margin: "0 auto",
+          padding: "24px 24px 40px",
+          display: "grid",
+          gridTemplateColumns: "1fr 320px",
+          gap: "24px",
+          alignItems: "start",
+        }}>
 
-          {/* ── Timeline ── */}
-          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "16px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              {timelineEstados.map(({ key, label }, i) => {
-                const ts = pedido.timestamps?.[key];
-                const at = ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
-                const done = !!at && !isNaN(at);
-                const isCurrent = key === "CONTROLADO";
-                return (
-                  <div key={key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
-                    {i > 0 && (
-                      <div style={{ position: "absolute", top: "9px", right: "50%", left: "-50%", height: "2px", background: done ? "#a855f7" : "#e2e8f0", zIndex: 0 }} />
-                    )}
-                    <div style={{ width: "18px", height: "18px", borderRadius: "50%", background: isCurrent ? "#7c3aed" : done ? "#a855f7" : "#e2e8f0", border: `2px solid ${isCurrent ? "#7c3aed" : done ? "#a855f7" : "#e2e8f0"}`, zIndex: 1, position: "relative" }} />
-                    <p style={{ margin: "4px 0 0", fontSize: "0.62rem", fontWeight: isCurrent ? 700 : 500, color: isCurrent ? "#7c3aed" : done ? "#6d28d9" : "#94a3b8", textAlign: "center", lineHeight: 1.2 }}>{label}</p>
-                    {done && <p style={{ margin: "1px 0 0", fontSize: "0.58rem", color: "#94a3b8", textAlign: "center" }}>{at.toLocaleDateString("es-AR", { day: "2-digit", month: "short" })}</p>}
+          {/* ════ COLUMNA IZQUIERDA ════ */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+
+            {/* Timeline */}
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 20px" }}>
+              <p style={{ margin: "0 0 14px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Estado del pedido</p>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                {timelineEstados.map(({ key, label }, i) => {
+                  const ts = pedido.timestamps?.[key];
+                  const at = ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
+                  const done = !!at && !isNaN(at);
+                  const isCurrent = key === "CONTROLADO";
+                  return (
+                    <div key={key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
+                      {i > 0 && <div style={{ position: "absolute", top: "11px", right: "50%", left: "-50%", height: "2px", background: done ? "#a855f7" : "#e2e8f0", zIndex: 0 }} />}
+                      <div style={{ width: "22px", height: "22px", borderRadius: "50%", background: isCurrent ? "#7c3aed" : done ? "#a855f7" : "#e2e8f0", border: `2.5px solid ${isCurrent ? "#7c3aed" : done ? "#a855f7" : "#e2e8f0"}`, zIndex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {done && !isCurrent && <span style={{ fontSize: "0.6rem", color: "#fff" }}>✓</span>}
+                      </div>
+                      <p style={{ margin: "5px 0 0", fontSize: "0.68rem", fontWeight: isCurrent ? 800 : 500, color: isCurrent ? "#7c3aed" : done ? "#6d28d9" : "#94a3b8", textAlign: "center", lineHeight: 1.2 }}>{label}</p>
+                      {done && <p style={{ margin: "2px 0 0", fontSize: "0.6rem", color: "#b8b8cc", textAlign: "center" }}>{at.toLocaleDateString("es-AR", { day: "2-digit", month: "short" })}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Info preparación */}
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 20px" }}>
+              <p style={{ margin: "0 0 14px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Preparación</p>
+              <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "16px" }}>
+                <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.1rem", fontWeight: 700, color: "#fff", flexShrink: 0 }}>{avatarInitial}</div>
+                <div>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: "1rem", color: "#0f172a" }}>{operarioNombre}</p>
+                  {preparadoElapsed && <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "#64748b" }}>Preparado {preparadoElapsed}</p>}
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px" }}>
+                {[
+                  { val: pedido.bultos, label: "Bultos" },
+                  { val: pedido.paquetes, label: "Paquetes" },
+                  { val: productos.length, label: "Ítems" },
+                ].map(({ val, label }) => (
+                  <div key={label} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px", textAlign: "center" }}>
+                    <p style={{ margin: 0, fontSize: "1.6rem", fontWeight: 800, color: "#0f172a" }}>{val ?? "—"}</p>
+                    <p style={{ margin: "3px 0 0", fontSize: "0.68rem", color: "#94a3b8", fontWeight: 700, textTransform: "uppercase" }}>{label}</p>
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* ── Info de preparación ── */}
-          <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Preparación</p>
-          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "16px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
-              <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: 700, color: "#fff", flexShrink: 0 }}>{avatarInitial}</div>
+            {/* Productos — Perfiles/Kits */}
+            {prodsOperario.length > 0 && (
               <div>
-                <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "#0f172a" }}>{operarioNombre}</p>
-                {preparadoElapsed && <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "#64748b" }}>Preparado {preparadoElapsed}</p>}
+                <p style={{ margin: "0 0 10px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                  Perfiles y kits · {prodsOperario.length} ítem{prodsOperario.length !== 1 ? "s" : ""}
+                </p>
+                <ProductList items={prodsOperario} accentBg="#dbeafe" accentColor="#1d4ed8" borderColor="#bfdbfe" />
               </div>
-            </div>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <div style={{ flex: 1, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px", textAlign: "center" }}>
-                <p style={{ margin: 0, fontSize: "1.4rem", fontWeight: 800, color: "#0f172a" }}>{pedido.bultos ?? "—"}</p>
-                <p style={{ margin: "2px 0 0", fontSize: "0.7rem", color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" }}>Bultos</p>
+            )}
+
+            {/* Productos — Accesorios/Otros */}
+            {prodsEncargado.length > 0 && (
+              <div>
+                <p style={{ margin: "0 0 10px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                  Accesorios y otros · {prodsEncargado.length} ítem{prodsEncargado.length !== 1 ? "s" : ""}
+                </p>
+                <ProductList items={prodsEncargado} accentBg="#ffedd5" accentColor="#c2410c" borderColor="#fed7aa" />
               </div>
-              <div style={{ flex: 1, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px", textAlign: "center" }}>
-                <p style={{ margin: 0, fontSize: "1.4rem", fontWeight: 800, color: "#0f172a" }}>{pedido.paquetes ?? "—"}</p>
-                <p style={{ margin: "2px 0 0", fontSize: "0.7rem", color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" }}>Paquetes</p>
+            )}
+
+            {/* Sin catálogo: lista genérica */}
+            {Object.keys(catalogoMap).length === 0 && productos.length > 0 && (
+              <div>
+                <p style={{ margin: "0 0 10px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                  Productos · {productos.length} ítems
+                </p>
+                <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.88rem" }}>
+                    <tbody>
+                      {productos.map((it, i) => {
+                        const raw = it.cod || it.descripcion || it.desc || "";
+                        const uru = toURUCode(raw);
+                        const nombre = it.descripcion || it.desc || it.nombre || uru || "—";
+                        const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                        return (
+                          <tr key={i} style={{ borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                            <td style={{ padding: "10px 14px", color: "#1e293b", fontWeight: 500 }}>{nombre}</td>
+                            <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                              <span style={{ background: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: "0.85rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div style={{ flex: 1, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px", textAlign: "center" }}>
-                <p style={{ margin: 0, fontSize: "1.4rem", fontWeight: 800, color: "#0f172a" }}>{productos.length}</p>
-                <p style={{ margin: "2px 0 0", fontSize: "0.7rem", color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" }}>Ítems</p>
-              </div>
-            </div>
+            )}
           </div>
 
-          {/* ── Productos — Perfiles/Kits ── */}
-          {prodsOperario.length > 0 && (
-            <>
-              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Perfiles y kits · {prodsOperario.length} ítem{prodsOperario.length !== 1 ? "s" : ""}</p>
-              <div style={{ background: "#fff", border: "1.5px solid #bfdbfe", borderRadius: "14px", padding: "4px 16px", marginBottom: "12px" }}>
-                {prodsOperario.map(({ it, uru }, i) => {
-                  const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
-                  const color = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
-                  const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
-                  return (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: i < prodsOperario.length - 1 ? "1px solid #f1f5f9" : "none" }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ margin: 0, fontSize: "0.86rem", fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
-                        {color && <p style={{ margin: "1px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
-                      </div>
-                      <span style={{ flexShrink: 0, background: "#dbeafe", color: "#1d4ed8", fontWeight: 700, fontSize: "0.82rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
+          {/* ════ COLUMNA DERECHA — aside sticky ════ */}
+          <div style={{ position: "sticky", top: "76px", display: "flex", flexDirection: "column", gap: "14px" }}>
 
-          {/* ── Productos — Accesorios/Otros ── */}
-          {prodsEncargado.length > 0 && (
-            <>
-              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Accesorios y otros · {prodsEncargado.length} ítem{prodsEncargado.length !== 1 ? "s" : ""}</p>
-              <div style={{ background: "#fff", border: "1.5px solid #fed7aa", borderRadius: "14px", padding: "4px 16px", marginBottom: "16px" }}>
-                {prodsEncargado.map(({ it, uru }, i) => {
-                  const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
-                  const color = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
-                  const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
-                  return (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: i < prodsEncargado.length - 1 ? "1px solid #f1f5f9" : "none" }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ margin: 0, fontSize: "0.86rem", fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
-                        {color && <p style={{ margin: "1px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
-                      </div>
-                      <span style={{ flexShrink: 0, background: "#ffedd5", color: "#c2410c", fontWeight: 700, fontSize: "0.82rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
+            {/* Resumen rápido */}
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 18px" }}>
+              <p style={{ margin: "0 0 12px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Resumen</p>
+              {[
+                { label: "Pedido", value: `#${pedido.numero || id}` },
+                { label: "Cliente", value: pedido.cliente || "—" },
+                { label: "Método", value: pedido.metodoEntrega || "—" },
+                { label: "Depósito", value: pedido.deposito || "—" },
+                { label: "Bultos", value: pedido.bultos ?? "—" },
+                { label: "Operario", value: operarioNombre },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "6px 0", borderBottom: "1px solid #f1f5f9", gap: "8px" }}>
+                  <span style={{ fontSize: "0.78rem", color: "#94a3b8", fontWeight: 500, flexShrink: 0 }}>{label}</span>
+                  <span style={{ fontSize: "0.88rem", fontWeight: 600, color: "#0f172a", textAlign: "right" }}>{value}</span>
+                </div>
+              ))}
+            </div>
 
-          {/* Si el catálogo no cargó: lista sin categorizar */}
-          {Object.keys(catalogoMap).length === 0 && productos.length > 0 && (
-            <>
-              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Productos · {productos.length} ítems</p>
-              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "4px 16px", marginBottom: "16px" }}>
-                {productos.map((it, i) => {
-                  const raw = it.cod || it.descripcion || it.desc || "";
-                  const uru = toURUCode(raw);
-                  const nombre = it.descripcion || it.desc || it.nombre || uru || "—";
-                  const qty = it.cant ?? it.cantidad ?? it.qty ?? 0;
-                  return (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
-                      <p style={{ flex: 1, margin: 0, fontSize: "0.86rem", color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
-                      <span style={{ flexShrink: 0, background: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: "0.82rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
+            {/* CTA: Despachar */}
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 18px" }}>
+              <ConfirmarDespacho pedidoId={id} compact />
+            </div>
 
-        {/* ── CTA fijo: Despachar ── */}
-        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 16px 20px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)" }}>
-          <ConfirmarDespacho pedidoId={id} />
-        </div>
+            {/* Cancelar pedido */}
+            {isVentas && pedido.estado !== "DESPACHADO" && (
+              <button
+                type="button"
+                onClick={() => { setShowCancelModal(true); setCancelStep(1); setCancelMotivo(""); setCancelOtroText(""); }}
+                style={{
+                  width: "100%", padding: "10px", borderRadius: "10px",
+                  border: "1.5px solid #fca5a5", background: "#fef2f2",
+                  color: "#dc2626", fontSize: "0.82rem", fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar pedido
+              </button>
+            )}
+          </div>
+
+        </div>{/* fin grid */}
+
+        {/* ── Modal: Cancelar pedido ── */}
+        {showCancelModal && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+            <div style={{ background: "#fff", borderRadius: "20px", padding: "24px", width: "100%", maxWidth: "460px", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+                <h2 style={{ margin: 0, fontWeight: 800, fontSize: "1.05rem", color: "#0f172a" }}>
+                  Cancelar pedido #{pedido.numero || id}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setShowCancelModal(false)}
+                  style={{ background: "none", border: "none", fontSize: "1.2rem", color: "#94a3b8", cursor: "pointer" }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Advertencia */}
+              <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "10px 14px", marginBottom: "16px", display: "flex", gap: "8px", alignItems: "center" }}>
+                <span style={{ fontSize: "1rem", flexShrink: 0 }}>⚠️</span>
+                <p style={{ margin: 0, fontSize: "0.82rem", color: "#dc2626", fontWeight: 600 }}>
+                  Esta acción no se puede deshacer
+                </p>
+              </div>
+
+              {cancelStep === 1 ? (
+                <>
+                  <p style={{ margin: "0 0 12px", fontSize: "0.78rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    Motivo de cancelación
+                  </p>
+
+                  {/* Chips de motivo */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
+                    {["El cliente se arrepintió", "Producto sin stock", "Error en el pedido", "Cliente no disponible", "Otro"].map(m => (
+                      <button
+                        key={m} type="button"
+                        onClick={() => setCancelMotivo(m)}
+                        style={{
+                          width: "100%", textAlign: "left", padding: "10px 14px",
+                          borderRadius: "10px", cursor: "pointer", fontFamily: "inherit",
+                          border: cancelMotivo === m ? "2px solid #dc2626" : "1.5px solid #e2e8f0",
+                          background: cancelMotivo === m ? "#fef2f2" : "#f8fafc",
+                          color: cancelMotivo === m ? "#dc2626" : "#334155",
+                          fontSize: "0.88rem", fontWeight: cancelMotivo === m ? 700 : 500,
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                        }}
+                      >
+                        {m}
+                        {cancelMotivo === m && <span style={{ fontSize: "0.9rem" }}>✓</span>}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Input para "Otro" */}
+                  {cancelMotivo === "Otro" && (
+                    <input
+                      type="text"
+                      value={cancelOtroText}
+                      onChange={e => setCancelOtroText(e.target.value)}
+                      placeholder="Describí el motivo…"
+                      style={{
+                        width: "100%", boxSizing: "border-box",
+                        padding: "10px 12px", border: "1.5px solid #e2e8f0",
+                        borderRadius: "10px", fontSize: "0.9rem",
+                        marginBottom: "12px",
+                      }}
+                    />
+                  )}
+
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowCancelModal(false)}
+                      style={{ flex: 1, padding: "11px", borderRadius: "10px", border: "1.5px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontWeight: 600, cursor: "pointer" }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!cancelMotivo || (cancelMotivo === "Otro" && !cancelOtroText.trim())}
+                      onClick={() => setCancelStep(2)}
+                      style={{
+                        flex: 2, padding: "11px", borderRadius: "10px", border: "none",
+                        background: cancelMotivo && (cancelMotivo !== "Otro" || cancelOtroText.trim()) ? "#dc2626" : "#e2e8f0",
+                        color: cancelMotivo && (cancelMotivo !== "Otro" || cancelOtroText.trim()) ? "#fff" : "#94a3b8",
+                        fontWeight: 700, cursor: "pointer",
+                      }}
+                    >
+                      Continuar →
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ background: "#f8fafc", borderRadius: "12px", padding: "14px", marginBottom: "16px" }}>
+                    <p style={{ margin: "0 0 4px", fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase" }}>Motivo seleccionado</p>
+                    <p style={{ margin: 0, fontSize: "0.92rem", fontWeight: 700, color: "#0f172a" }}>
+                      {cancelMotivo === "Otro" ? cancelOtroText.trim() : cancelMotivo}
+                    </p>
+                  </div>
+                  <p style={{ margin: "0 0 16px", fontSize: "0.9rem", color: "#334155", lineHeight: 1.5 }}>
+                    ¿Estás seguro? Esta acción cancelará el pedido definitivamente y no se puede revertir.
+                  </p>
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setCancelStep(1)}
+                      style={{ flex: 1, padding: "11px", borderRadius: "10px", border: "1.5px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontWeight: 600, cursor: "pointer" }}
+                    >
+                      ← Volver
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelar}
+                      disabled={canceling}
+                      style={{
+                        flex: 2, padding: "11px", borderRadius: "10px", border: "none",
+                        background: "#dc2626", color: "#fff",
+                        fontWeight: 700, cursor: canceling ? "not-allowed" : "pointer",
+                        opacity: canceling ? 0.7 : 1,
+                      }}
+                    >
+                      {canceling ? "Cancelando…" : "Confirmar cancelación"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -2105,6 +2739,16 @@ const filteredOperarios = useMemo(() => {
           </div>
         </div>
       </div>
+
+      {/* TODO FEATURE: Modificación de pedido preparado
+           Permitir al vendedor editar los productos de un pedido que ya está en estado PREPARADO o CONTROLADO.
+           Requiere: 1) botón "Modificar pedido" visible solo para ventas y admin,
+                     2) modal con lista editable de productos (agregar/quitar/cambiar cant.),
+                     3) al guardar: actualizar pedido.productos en Firestore, cambiar estado a EN_PREPARACION
+                        si venía de PREPARADO (para re-preparar), y registrar en audit trail (adminOverride).
+           Dependencias: canAdminOverride en Firestore rules ya permite cambiar productos.
+           Bloquear si el pedido ya está DESPACHADO.
+      */}
 
       {/* Productos (Customer No, Color, Cantidad) — ocultar en EN_PREPARACION para no duplicar */}
         {pedido.estado !== ESTADOS.EN_PREPARACION && (
@@ -2379,13 +3023,20 @@ const filteredOperarios = useMemo(() => {
           pedido={pedido}
           productos={productos}
           catalogIndex={catalogoMap}                  // mapa { codUru -> {customerNo, finish, ...} }
+          btnFinalizarLabel={isIsabela ? "Pedido completado" : undefined}
+          onReportarError={async ({ productos }) => { await submitErrorPreparacion(productos); }}
           onPreparacionFinalizada={async () => {
             try {
-              // ISABELA: encargado auto-asignado → salta PREPARADO, va directo a CONTROLADO
-              const nextEstado = (isIsabela && isSelfAssigned) ? ESTADOS.CONTROLADO : ESTADOS.PREPARADO;
+              // ISABELA: encargado → salta PREPARADO, va directo a CONTROLADO (listo para despachar)
+              const nextEstado = isIsabela ? ESTADOS.CONTROLADO : ESTADOS.PREPARADO;
               await updateEstado(id, nextEstado);
-              setPedido(prev => prev ? { ...prev, estado: nextEstado } : prev);
-              toast.success(nextEstado === ESTADOS.CONTROLADO ? "Listo para despacho ✓" : "Pedido preparado");
+              if (isIsabela) {
+                toast.success("Pedido listo para despachar ✓");
+                navigate("/pedidos");
+              } else {
+                setPedido(prev => prev ? { ...prev, estado: nextEstado } : prev);
+                toast.success("Pedido preparado");
+              }
             } catch (e) {
               toast.error(e?.message || "No se pudo finalizar la preparación");
             }
@@ -2399,22 +3050,26 @@ const filteredOperarios = useMemo(() => {
       {pedido.estado === ESTADOS.CONTROLADO && (
         isVentas ? (
           // === CONTROLADO — VENTAS ===
-          <>
-            {/* Acción principal para ventas */}
-            <div className="card">
-              <div className="order-body">
-                
-                  <ConfirmarDespacho pedidoId={id} />
-                
-              </div>
-            </div>
-          </>
+          <div className="card" style={{ padding: "20px 24px" }}>
+            <ConfirmarDespacho pedidoId={id} />
+          </div>
         ) : (
           // === CONTROLADO — ENCARGADO ===
           <div className="card">
-            <p className="text-sm text-gray-600 mb-2">
-              Estado: <b>CONTROLADO</b>. Listo para despacho.
-            </p>
+            {isIsabela ? (
+              <div style={{ padding: "4px 0" }}>
+                <p style={{ margin: "0 0 4px", fontSize: "0.8rem", fontWeight: 700, color: "#16a34a", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  ✅ Preparado
+                </p>
+                <p style={{ margin: 0, fontSize: "0.95rem", color: "#475569" }}>
+                  Esperando despacho del vendedor.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-600 mb-2">
+                Estado: <b>CONTROLADO</b>. Listo para despacho.
+              </p>
+            )}
           </div>
         )
       )}
