@@ -27,6 +27,9 @@ export default function Inicio() {
   const isEncargadoOOperario = profile?.rol === "encargado" || profile?.rol === "operario";
   const isAdmin = profile?.rol === "admin";
 
+  // Depósito ISABELA → menú reducido (solo "Preparación de Pedidos")
+  const isIsabela = String(profile?.deposito || "").toUpperCase() === "ISABELA";
+
   // ==========================================================
   // 🔥 LÓGICA DE SINCRONIZACIÓN DE CLIENTES (SOLO ADMIN)
   // ==========================================================
@@ -143,7 +146,7 @@ export default function Inicio() {
   // ==========================================================
   const handlePrepDespacho = () => {
     const role = profile?.rol;
-    if (role === "ventas") { navigate("/ventas/para-despachar"); return; }
+    if (role === "ventas") { navigate("/ventas/pipeline"); return; }
     if (role === "operario") { navigate("/operario/asignados"); return; }
     navigate("/pedidos");
   };
@@ -245,42 +248,56 @@ export default function Inicio() {
         </div>
 
         <div className="menu-buttons-adaptive">
-          {isVentas && (
+          {/* ── Menú reducido para depósito ISABELA ── */}
+          {isIsabela ? (
+            <button
+              className="btn btn-big-adaptive btn--elevated"
+              onClick={handlePrepDespacho}
+              style={{ backgroundColor: 'var(--brand)', color: 'white', border: 'none' }}
+            >
+              <span className="btn-icon">🚚</span>
+              Preparación de Pedidos
+            </button>
+          ) : (
             <>
-              <button
-                className="btn btn-big-adaptive btn--elevated"
-                onClick={abrirBuscador}
-                style={{ backgroundColor: 'var(--brand)', color: 'white', border: 'none' }}
-              >
-                <span className="btn-icon">📝</span>
-                Crear Presupuesto / Pedido
-              </button>
+              {isVentas && (
+                <>
+                  <button
+                    className="btn btn-big-adaptive btn--elevated"
+                    onClick={abrirBuscador}
+                    style={{ backgroundColor: 'var(--brand)', color: 'white', border: 'none' }}
+                  >
+                    <span className="btn-icon">📝</span>
+                    Crear Presupuesto / Pedido
+                  </button>
+
+                  <button
+                    className="btn btn--outline btn-big-adaptive btn--elevated"
+                    onClick={() => navigate("/ventas/pedidos-web")}
+                  >
+                    <span className="btn-icon">🛒</span>
+                    Pedidos Web (Clientes)
+                  </button>
+
+                  <button
+                    className="btn btn--outline btn-big-adaptive btn--elevated"
+                    onClick={() => setShowMenuErrores(true)}
+                  >
+                    <span className="btn-icon">🛑</span>
+                    Carga Errores
+                  </button>
+                </>
+              )}
 
               <button
                 className="btn btn--outline btn-big-adaptive btn--elevated"
-                onClick={() => navigate("/ventas/pedidos-web")}
+                onClick={handlePrepDespacho}
               >
-                <span className="btn-icon">🛒</span>
-                Pedidos Web (Clientes)
-              </button>
-
-              <button
-                className="btn btn--outline btn-big-adaptive btn--elevated"
-                onClick={() => setShowMenuErrores(true)}
-              >
-                <span className="btn-icon">🛑</span>
-                Carga Errores
+                <span className="btn-icon">{isEncargadoOOperario ? "📦" : "🚚"}</span>
+                {isEncargadoOOperario ? "Gestión de Pedidos" : "Preparación de Pedidos"}
               </button>
             </>
           )}
-
-          <button
-            className="btn btn--outline btn-big-adaptive btn--elevated"
-            onClick={handlePrepDespacho}
-          >
-            <span className="btn-icon">{isEncargadoOOperario ? "📦" : "🚚"}</span>
-            {isEncargadoOOperario ? "Gestión de Pedidos" : "Preparación de Pedidos"}
-          </button>
 
           {profile?.rol === "encargado" && (
             <button
@@ -288,12 +305,32 @@ export default function Inicio() {
               onClick={() => navigate("/encargado/control-carga")}
             >
               <span className="btn-icon">🚛</span>
-              Control de Carga
+              Control de Carga (Agencias)
+            </button>
+          )}
+
+          {profile?.rol === "encargado" && (
+            <button
+              className="btn btn--outline btn-big-adaptive btn--elevated"
+              onClick={() => navigate("/encargado/camiones")}
+            >
+              <span className="btn-icon">🚚</span>
+              Camiones (Interior)
             </button>
           )}
 
           {isAdmin && (
-            <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+            <>
+              <button
+                className="btn btn--outline btn-big-adaptive btn--elevated"
+                onClick={() => navigate("/admin/panel")}
+                style={{ borderColor: '#6366f1', color: '#4f46e5' }}
+              >
+                <span className="btn-icon">⚙️</span>
+                Panel de administración
+              </button>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
                 <button
                   className="btn btn-big-adaptive btn--elevated"
                   onClick={handleSincronizarCatalogo} disabled={isSyncing}
@@ -303,7 +340,6 @@ export default function Inicio() {
                   Productos
                 </button>
 
-                {/* 🔥 NUEVO BOTÓN PARA ADMIN */}
                 <button
                   className="btn btn-big-adaptive btn--elevated"
                   onClick={handleSincronizarClientes} disabled={isSyncingClientes}
@@ -312,7 +348,8 @@ export default function Inicio() {
                   <span className="btn-icon">{isSyncingClientes ? "⏳" : "👥"}</span>
                   Clientes
                 </button>
-            </div>
+              </div>
+            </>
           )}
         </div>
       </div>
