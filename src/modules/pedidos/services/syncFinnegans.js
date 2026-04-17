@@ -1,5 +1,5 @@
 import { getPedidosPendientes } from "../../../API/finnegans";
-import { upsertPedidoDesdeFinnegans, actualizarPedidosControladosADespachado, marcarAnuladosEnRango } from "./pedidosFS";
+import { upsertPedidoDesdeFinnegans } from "./pedidosFS";
 import { mapFinDocToPedido } from "./mapFinnegans";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 
@@ -294,33 +294,12 @@ export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = false 
 
   if (debug) console.log("[SYNC] resumen agrupado", resumen);
 
-  function normalizeNumero(x) {
-  return String(x)
-    .replace(/\u00A0/g, " ")
-    .replace(/^PEDVTA\s*-\s*/i, "") // quita prefijo "PEDVTA - "
-    .trim();
-  }
+  // NOTA: el sync NO modifica estados automáticamente.
+  // Ningún pedido pasa a DESPACHADO ni ANULADO por desaparecer del informe.
+  // Los cambios de estado solo ocurren de forma manual (ventas / admin)
+  // o si Finnegans modifica los productos del pedido (ver upsertPedidoDesdeFinnegans).
 
-  const numerosFin = filas
-    .map(f => (f.NUMERO || f.numero || f.NumeroDocumento || f.DOCNROINT || ""))
-    .map(normalizeNumero)
-    .filter(Boolean);
-
-  await actualizarPedidosControladosADespachado(numerosFin);
-
-  // Detectar pedidos PENDIENTE_ASIGNAR que ya no existen en Finnegans → marcar ANULADO
-  // Usamos un Set con ambas formas del ID (con y sin prefijo "PEDVTA - ")
-  const idsActivos = new Set();
-  for (const id of pedidosMap.keys()) {
-    idsActivos.add(id);
-    idsActivos.add(id.replace(/^PEDVTA\s*-\s*/i, "").trim());
-  }
-  const fechaDesdeAnulacion = new Date();
-  fechaDesdeAnulacion.setDate(fechaDesdeAnulacion.getDate() - 15);
-  const anulados = await marcarAnuladosEnRango(idsActivos, fechaDesdeAnulacion);
-  if (anulados > 0) console.log(`[SYNC] Pedidos anulados automáticamente: ${anulados}`);
-
-  return { ...resumen, anulados };
+  return resumen;
 }
 
 
