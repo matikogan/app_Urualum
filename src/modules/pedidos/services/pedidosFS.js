@@ -22,6 +22,61 @@ function isPlainObject(o) {
   return o && typeof o === "object" && !Array.isArray(o);
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Helpers internos para detectar cambios de productos (sync Finnegans)
+// ─────────────────────────────────────────────────────────────────
+function _extractCode(item) {
+  if (!item) return null;
+  const raw = item.cod || item.codigo || item.codigoURU || item.ProductoCodigo || "";
+  const s = String(raw).trim();
+  const m = s.match(/\b\d{7,}\b/);
+  const code = m ? m[0] : s.split(/\s+/)[0].replace(/[^\w-]/g, "");
+  return code || null;
+}
+function _extractQty(item) {
+  const v = item.cant ?? item.cantidad ?? item.qty ?? item.Cantidad ?? 0;
+  return Number(v) || 0;
+}
+function _extractNombre(item) {
+  return item.descripcion || item.desc || item.nombre || item.cod || item.codigo || _extractCode(item) || "—";
+}
+
+/**
+ * Compara lista anterior vs nueva de productos.
+ * Devuelve { hasChanges, added, removed, changed }.
+ */
+function _detectProductChanges(prevProductos, newProductos) {
+  const prevMap = new Map();
+  for (const it of prevProductos || []) {
+    const cod = _extractCode(it);
+    if (!cod) continue;
+    prevMap.set(cod, { qty: _extractQty(it), item: it });
+  }
+  const newMap = new Map();
+  for (const it of newProductos || []) {
+    const cod = _extractCode(it);
+    if (!cod) continue;
+    newMap.set(cod, { qty: _extractQty(it), item: it });
+  }
+
+  const added = [], removed = [], changed = [];
+
+  for (const [cod, { qty, item }] of newMap) {
+    if (!prevMap.has(cod)) {
+      added.push({ cod, nombre: _extractNombre(item), cant: qty });
+    } else if (prevMap.get(cod).qty !== qty) {
+      changed.push({ cod, nombre: _extractNombre(item), cantAntes: prevMap.get(cod).qty, cantAhora: qty });
+    }
+  }
+  for (const [cod, { qty, item }] of prevMap) {
+    if (!newMap.has(cod)) {
+      removed.push({ cod, nombre: _extractNombre(item), cant: qty });
+    }
+  }
+
+  return { hasChanges: added.length > 0 || removed.length > 0 || changed.length > 0, added, removed, changed };
+}
+
 /** Quita undefined y NaN/Infinity en profundidad. Opcionalmente transforma undefined→null si preferís. */
 function sanitizeForFirestore(input) {
   if (Array.isArray(input)) {
@@ -273,6 +328,54 @@ export async function upsertPedidoDesdeFinnegans(pedido) {
     }
 
 
+
+  // ── Detección de cambios de productos desde Finnegans ────────────────────
+  // Solo aplica cuando el pedido YA existía Y su estado es distinto a
+  // PENDIENTE_ASIGNAR (si todavía no fue procesado, no hace falta resetear).
+  if (prevSnap.exists()) {
+    const estadoActual = prev.estado || "PENDIENTE_ASIGNAR";
+    const esPendiente  = estadoActual === "PENDIENTE_ASIGNAR";
+
+    if (!esPendiente) {
+      const { hasChanges, added, removed, changed } = _detectProductChanges(
+        prev.productos,
+        pedido.productos,
+      );
+
+      if (hasChanges) {
+        // Snapshot de lo que había preparado (para pre-tildar en la vista del operario)
+        const ESTADOS_CON_PREP = ["ASIGNADO", "EN_PREPARACION", "PREPARADO", "CONTROLADO"];
+        const itemsPreparados = {};
+        if (ESTADOS_CON_PREP.includes(estadoActual)) {
+          for (const it of prev.productos || []) {
+            const cod = _extractCode(it);
+            if (!cod) continue;
+            itemsPreparados[cod] = { cant: _extractQty(it), nombre: _extractNombre(it) };
+          }
+        }
+
+        // Volver al inicio del flujo
+        updateDataRaw.estado           = "PENDIENTE_ASIGNAR";
+        updateDataRaw.itemsPreparados  = itemsPreparados;
+        updateDataRaw.modificacionInfo = {
+          at:             serverTimestamp(),
+          estadoAnterior: estadoActual,
+          origen:         "finnegans-sync",
+          addedItems:     added,
+          removedItems:   removed,
+          changedItems:   changed,
+        };
+
+        // Limpiar estado de preparación anterior
+        updateDataRaw.prepPerfilesOk   = null;
+        updateDataRaw.prepAccesoriosOk = null;
+        updateDataRaw.bultos           = null;
+        updateDataRaw.paquetes         = null;
+        updateDataRaw.operarioId       = null;
+        updateDataRaw.operarioNombre   = null;
+      }
+    }
+  }
 
   // Parse finFechaTS si viene
   if (pedido.finFecha) {
