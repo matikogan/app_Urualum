@@ -128,11 +128,27 @@ function parseFinFecha(fin) {
  * a nuestro pedido en Firestore.
  */
 
+/**
+ * Normaliza cualquier variante del ID Finnegans a "PEDVTA - XXXXX".
+ * Finnegans manda el mismo número en campos distintos según el reporte:
+ *   DOCNROINT = "18885"                 → solo número
+ *   IDENTIFICACIONEXTERNA = "PEDVTA - 18885"  → con prefijo
+ * Sin normalización se crean dos documentos Firestore distintos para el mismo pedido.
+ */
+function canonicalizePedidoId(raw) {
+  const s = String(raw || "").replace(/\u00A0/g, " ").trim();
+  if (!s) return null;
+  // Ya tiene prefijo PEDVTA (con cualquier variante de espaciado/guión)
+  const m = s.match(/^PEDVTA\s*-\s*(.+)$/i);
+  if (m) return `PEDVTA - ${m[1].trim()}`;
+  // Solo el número u otro formato → agregar prefijo canónico
+  return `PEDVTA - ${s}`;
+}
+
 export function mapFinDocToPedido(fin) {
   if (!fin) return null;
 
-  // 1) ID / número del pedido
-  // OJO: Finnegans a veces lo manda en DOCNROINT, otras en IDENTIFICACIONEXTERNA (todo mayúsculas)
+  // 1) ID / número del pedido — siempre normalizado a "PEDVTA - XXXXX"
   const rawId =
     fin.DOCNROINT ||
     fin.DocNroInt ||
@@ -140,13 +156,13 @@ export function mapFinDocToPedido(fin) {
     fin.NumeroDocumento ||
     fin.NUMERO ||
     fin.numero ||
-    fin.IDENTIFICACIONEXTERNA ||   // 👈 clave tal cual viene en el JSON real
+    fin.IDENTIFICACIONEXTERNA ||
     fin.IdentificacionExterna ||
     fin.ID ||
     fin.Nombre ||
     "";
 
-  const id = String(rawId).replace(/\u00A0/g, " ").trim(); // limpiamos NBSP y espacios
+  const id = canonicalizePedidoId(rawId);
   if (!id) return null;
 
 

@@ -282,15 +282,21 @@ const OP_KEYS = ["estado", "operarioId", "operarioNombre", "timestamps"];
  * Upsert de sync: nunca lee. Update primero; si not-found -> create.
  * Quita siempre los campos operativos para cumplir reglas de sync.
  */
-export async function upsertPedidoDesdeFinnegans(pedido) {
-  if (!pedido?.id) throw new Error("pedido.id faltante");
+export async function upsertPedidoDesdeFinnegans(pedidoInput) {
+  if (!pedidoInput?.id) throw new Error("pedido.id faltante");
 
   // === NO GUARDAR COTIZACIONES ===
-  if (pedido.esCotizacion || pedido.deposito === "COTIZACION") {
+  if (pedidoInput.esCotizacion || pedidoInput.deposito === "COTIZACION") {
     return { skipped: true };
   }
 
-  const ref = doc(db, "pedidos", pedido.id);
+  // Normalizar ID a "PEDVTA - XXXXX" (red de seguridad — ya se normaliza en mapFinDocToPedido,
+  // pero este sanitizador garantiza consistencia ante cualquier llamada directa)
+  const rawNum = String(pedidoInput.id).replace(/\u00A0/g, " ").replace(/^PEDVTA\s*-\s*/i, "").trim();
+  const canonicalId = rawNum ? `PEDVTA - ${rawNum}` : pedidoInput.id;
+  const pedido = { ...pedidoInput, id: canonicalId };
+
+  const ref = doc(db, "pedidos", canonicalId);
   const prevSnap = await getDoc(ref);
 
 
