@@ -62,273 +62,310 @@ function splitPorCategoria(productos, catalogoMap) {
 
 
 function EncPreparacionPanel({
-  pedido,                  // objeto pedido completo
-  productos,               // pedido.productos (array)
-  catalogIndex,            // índice { codUru -> {customerNo, finish, ...} } si ya lo traés
-  onClose,                 // si querés volver atrás
-  onPreparacionFinalizada, // callback para cuando se termina (cambia estado)
-  btnFinalizarLabel,       // etiqueta personalizada para el botón final
-  onReportarError,         // async (detalle: string) => void — reporta error y cambia estado
+  pedido,
+  productos,
+  catalogIndex,
+  onClose,
+  onPreparacionFinalizada,
+  btnFinalizarLabel,
+  onReportarError,
 }) {
-  const { featureFlags } = useApp();
-  const lite = featureFlags?.MODO_LITE !== false;
+  // ── Estado ────────────────────────────────────────────────────
+  const [checks, setChecks]               = React.useState({});
+  const [modBannerDismissed, setModBannerDismissed] = React.useState(false);
+  const [showErrPanel, setShowErrPanel]   = React.useState(false);
+  const [errProductos, setErrProductos]   = React.useState([]);
+  const [expandedProdKey, setExpandedProdKey] = React.useState(null);
+  const [pendingTipo, setPendingTipo]     = React.useState(null);
+  const [pendingCant, setPendingCant]     = React.useState("");
+  const [savingErr, setSavingErr]         = React.useState(false);
 
-  // estado UI compartido (idéntico a Operario)
-  const [prep, setPrep] = React.useState({});         // { key: { usarSueltas, usarDePaquete, paquete: {packSize} } }
-  const [checks, setChecks] = React.useState({});     // modo lite: tildes
-  const [scanForKey, setScanForKey] = React.useState(null);
-  const [modalPack, setModalPack] = React.useState(null);   // {key, packSize, remain}
-  const [modalError, setModalError] = React.useState(null); // {title, message}
-  const [showErrPanel, setShowErrPanel]     = React.useState(false);
-  const [errProductos, setErrProductos]     = React.useState([]);        // [{ key, cod, nombre, tipo, cant }]
-  const [expandedProdKey, setExpandedProdKey] = React.useState(null);    // key del producto expandido
-  const [pendingTipo, setPendingTipo]       = React.useState(null);
-  const [pendingCant, setPendingCant]       = React.useState("");
-  const [savingErr, setSavingErr]           = React.useState(false);
-
-
-
-
-  // helpers
+  // ── Helpers ───────────────────────────────────────────────────
   const toURU = v => String(v || "").match(/\d{6,}/)?.[0] || String(v || "");
+
   const needMap = React.useMemo(() => {
     const map = {};
     (productos || []).forEach((it, i) => {
       const uru = toURU(it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || "");
-      const key = `${uru}-${i}`;
-      map[key] = Number(it.cantidad || it.cant || it.qty || 0);
+      map[`${uru}-${i}`] = Number(it.cantidad || it.cant || it.qty || 0);
     });
     return map;
   }, [productos]);
 
-  const allChecked = React.useMemo(() => {
-    if (!lite) return false;
-    const keys = Object.keys(needMap);
-    return keys.length > 0 && keys.every(k => checks[k]);
-  }, [lite, needMap, checks]);
+  const totalItems   = Object.keys(needMap).length;
+  const checkedCount = Object.values(checks).filter(Boolean).length;
+  const allChecked   = totalItems > 0 && checkedCount === totalItems;
+  const progreso     = totalItems > 0 ? Math.round((checkedCount / totalItems) * 100) : 0;
+
+  // ── Pre-tildar ítems que ya estaban preparados antes de la modificación ──
+  React.useEffect(() => {
+    if (!pedido?.modificacionInfo || !pedido?.itemsPreparados || !productos) return;
+    const preparados = pedido.itemsPreparados;
+    const nextChecks = {};
+    (productos || []).forEach((it, i) => {
+      const uru = toURU(it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || "");
+      if (!uru) return;
+      const snap = preparados[uru];
+      if (!snap) return; // producto nuevo → no pre-tildar
+      const oldQty = Number(snap.cant) || 0;
+      const newQty = Number(it.cantidad || it.cant || it.qty || 0);
+      if (oldQty >= newQty) nextChecks[`${uru}-${i}`] = true;
+    });
+    setChecks(nextChecks);
+    setModBannerDismissed(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedido?.id, pedido?.modificacionInfo]);
+
+  // ── Mapa de modificaciones por código ────────────────────────
+  const modInfo = pedido?.modificacionInfo;
+  const addedSet   = React.useMemo(() => new Set((modInfo?.addedItems   || []).map(x => x.cod)), [modInfo]);
+  const changedMap = React.useMemo(() => {
+    const m = {};
+    (modInfo?.changedItems || []).forEach(x => { m[x.cod] = x; });
+    return m;
+  }, [modInfo]);
 
   const marcarTodo = () => {
     const next = {};
     (productos || []).forEach((it, i) => {
       const uru = toURU(it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || "");
-      const key = `${uru}-${i}`;
-      next[key] = true;
+      next[`${uru}-${i}`] = true;
     });
     setChecks(next);
   };
 
-  // === RENDER ITEM (lite y full) ===
-  function renderItemLite(it, i) {
-    const uru = toURU(it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || "");
-    const key = `${uru}-${i}`;
-    const cat = catalogIndex?.[uru];
-    const customer = cat?.customerNo || uru;
-    const color = cat?.finish || "—";
+  // ── Render de cada producto ───────────────────────────────────
+  function renderProducto(it, i) {
+    const uru     = toURU(it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || "");
+    const key     = `${uru}-${i}`;
+    const cat     = catalogIndex?.[uru];
+    const nombre  = cat?.customerNo || it.descripcion || it.desc || it.nombre || uru;
+    const color   = cat?.finish || cat?.color || "";
     const checked = !!checks[key];
-    const need = needMap[key] || 0;
+    const need    = needMap[key] || 0;
+
+    // Badge de modificación
+    let modBadge = null;
+    if (addedSet.has(uru)) {
+      modBadge = { label: "NUEVO", bg: "#dcfce7", color: "#15803d" };
+    } else if (changedMap[uru]) {
+      const diff = changedMap[uru].cantAhora - changedMap[uru].cantAntes;
+      modBadge = diff > 0
+        ? { label: `+${diff} más`, bg: "#fef3c7", color: "#b45309" }
+        : { label: `${diff} menos`, bg: "#fee2e2", color: "#dc2626" };
+    }
 
     return (
-      <div key={key} className="card">
-        <div className="order-head">
-          <div className="order-number">{customer}</div>
-          <span className="product-color" style={{ marginLeft: 8 }}>{color}</span>
-          <span className="pill" style={{ marginLeft: "auto" }}>Req: {need}</span>
+      <button
+        key={key}
+        type="button"
+        onClick={() => setChecks(prev => ({ ...prev, [key]: !prev[key] }))}
+        style={{
+          display: "flex", alignItems: "center", gap: 14,
+          width: "100%", textAlign: "left",
+          background: checked ? "#f0fdf4" : "#fff",
+          border: `1.5px solid ${checked ? "#86efac" : modBadge ? "#fde68a" : "#e2e8f0"}`,
+          borderRadius: 16, padding: "14px 16px",
+          cursor: "pointer", transition: "all 0.15s ease",
+          boxShadow: checked ? "none" : "0 1px 4px rgba(0,0,0,0.06)",
+        }}
+      >
+        {/* Indicador circular */}
+        <div style={{
+          flexShrink: 0, width: 30, height: 30, borderRadius: "50%",
+          border: `2px solid ${checked ? "#16a34a" : "#cbd5e1"}`,
+          background: checked ? "#16a34a" : "transparent",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transition: "all 0.15s ease",
+        }}>
+          {checked && (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2.5 7L5.5 10L11.5 4" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
         </div>
 
-        <div className="order-body">
-          <label className="item-check-row" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <input
-              type="checkbox"
-              className="checkbox"
-              checked={checked}
-              onChange={() => setChecks(prev => ({ ...prev, [key]: !prev[key] }))}
-            />
-            <div className="muted">Marcar como preparado</div>
-          </label>
+        {/* Info producto */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <p style={{
+              margin: 0, fontSize: "0.92rem", fontWeight: 600,
+              color: checked ? "#15803d" : "#1e293b",
+              textDecoration: checked ? "line-through" : "none",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {nombre}
+            </p>
+            {modBadge && (
+              <span style={{
+                fontSize: "0.62rem", fontWeight: 800,
+                padding: "2px 7px", borderRadius: 999,
+                background: modBadge.bg, color: modBadge.color,
+                letterSpacing: "0.06em", textTransform: "uppercase", flexShrink: 0,
+              }}>
+                {modBadge.label}
+              </span>
+            )}
+          </div>
+          {color && (
+            <p style={{ margin: "2px 0 0", fontSize: "0.74rem", color: "#94a3b8" }}>{color}</p>
+          )}
         </div>
-      </div>
+
+        {/* Cantidad */}
+        <div style={{
+          flexShrink: 0,
+          background: checked ? "#dcfce7" : "#f1f5f9",
+          color: checked ? "#15803d" : "#475569",
+          fontWeight: 700, fontSize: "0.88rem",
+          padding: "5px 11px", borderRadius: 8,
+          transition: "all 0.15s ease",
+        }}>
+          ×{need}
+        </div>
+      </button>
     );
   }
 
-  function renderItemFull(it, i) {
-    const uru = toURU(it.cod || it.codigo || it.codigoURU || it.desc || it.descripcion || "");
-    const key = `${uru}-${i}`;
-    const cat = catalogIndex?.[uru];
-    const customer = cat?.customerNo || uru;
-    const color = cat?.finish || "—";
-    const need = needMap[key] || 0;
+  // ── Render principal ──────────────────────────────────────────
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
 
-    const p = prep[key] || {};
-    const usados = (p.usarSueltas || 0) + (p.usarDePaquete || 0);
-    const ok = usados >= need;
-    const dispSueltas = Number(it.sueltasDisp || 0); // si lo traés; si no, mostralo como 0
-
-    const setP = updater => {
-      setPrep(prev => ({ ...prev, [key]: { ...(prev[key] || {}), ...(typeof updater === "function" ? updater(prev[key] || {}) : updater) } }));
-    };
-
-    // UI de suma/resta horizontal
-    const QtyRow = ({ value, onDec, onInc, disabledMinus, disabledPlus, className }) => (
-      <div className={`qty-row ${className || ""}`}>
-        <button type="button" className="btn btn--outline btn-sm" onClick={onDec} disabled={disabledMinus}>-</button>
-        <div className="qty-value mono">{value}</div>
-        <button type="button" className="btn btn--outline btn-sm" onClick={onInc} disabled={disabledPlus}>+</button>
-      </div>
-    );
-
-    const remainNeed = Math.max(0, need - usados);
-
-    return (
-      <div key={key} className="card">
-        <div className="order-head">
-          <div className="order-number">{customer}</div>
-          <span className="product-color" style={{ marginLeft: 8 }}>{color}</span>
-          <span className="pill" style={{ marginLeft: "auto" }}>Req: {need}</span>
-          <span className={`pill ${ok ? "pill--ok" : ""}`} style={{ marginLeft: 8 }}>Usado: {usados}</span>
+      {/* Barra de progreso sticky */}
+      <div style={{
+        position: "sticky", top: 0, zIndex: 10,
+        background: "#fff",
+        borderBottom: "1px solid #f1f5f9",
+        padding: "12px 16px 10px",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#475569" }}>
+            {allChecked
+              ? "✓ Todos los productos cargados"
+              : `${checkedCount} de ${totalItems} productos`}
+          </span>
+          <span style={{ fontSize: "0.82rem", fontWeight: 700, color: allChecked ? "#16a34a" : "#3b82f6" }}>
+            {progreso}%
+          </span>
         </div>
+        <div style={{ height: 5, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
+          <div style={{
+            height: "100%", borderRadius: 999,
+            background: allChecked ? "#16a34a" : "#3b82f6",
+            width: `${progreso}%`,
+            transition: "width 0.3s ease, background 0.3s ease",
+          }} />
+        </div>
+      </div>
 
-        <div className="order-body space-y-2">
-
-          {/* Tiras sueltas */}
-          <div className="mt-1">
-            <div className="meta">Tiras sueltas disponibles: {dispSueltas}</div>
-            <QtyRow
-              className="mt-1"
-              value={p.usarSueltas || 0}
-              onDec={() => setP({ usarSueltas: Math.max(0, (p.usarSueltas || 0) - 1) })}
-              onInc={() => {
-                const max = Math.min(remainNeed - (p.usarDePaquete || 0), dispSueltas);
-                const next = Math.min(max, (p.usarSueltas || 0) + 1);
-                setP({ usarSueltas: Math.max(0, next) });
-              }}
-              disabledMinus={(p.usarSueltas || 0) <= 0}
-              disabledPlus={(p.usarSueltas || 0) >= Math.min(remainNeed - (p.usarDePaquete || 0), dispSueltas)}
-            />
-          </div>
-
-          {/* Usar del paquete */}
-          <div className="mt-2">
-            <div className="meta">Usar del paquete</div>
-            <QtyRow
-              className="mt-1"
-              value={p.usarDePaquete || 0}
-              onDec={() => setP({ usarDePaquete: Math.max(0, (p.usarDePaquete || 0) - 1) })}
-              onInc={() => {
-                const packSize = p.paquete?.packSize || 0;
-                const roomInPack = Math.max(0, packSize - (p.usarDePaquete || 0));
-                const can = Math.min(remainNeed, roomInPack);
-                const next = Math.min(can, (p.usarDePaquete || 0) + 1);
-                setP({ usarDePaquete: Math.max(0, next) });
-              }}
-              disabledMinus={(p.usarDePaquete || 0) <= 0}
-              disabledPlus={(() => {
-                const packSize = p.paquete?.packSize || 0;
-                const roomInPack = Math.max(0, packSize - (p.usarDePaquete || 0));
-                return remainNeed <= 0 || roomInPack <= 0;
-              })()}
-            />
-          </div>
-
-          {/* Escanear paquete siempre abajo */}
-          <div className="mt-2">
+      {/* Banner de modificación */}
+      {modInfo && !modBannerDismissed && (() => {
+        const items = [
+          ...(modInfo.addedItems   || []).map(x => ({ tipo: "add", label: `+ ${x.nombre} ×${x.cant}` })),
+          ...(modInfo.removedItems || []).map(x => ({ tipo: "del", label: `− ${x.nombre} (eliminado)` })),
+          ...(modInfo.changedItems || []).map(x => ({ tipo: "chg", label: `↕ ${x.nombre}: ${x.cantAntes} → ${x.cantAhora}` })),
+        ];
+        return (
+          <div style={{ margin: "12px 16px 0", background: "#fff7ed", border: "1.5px solid #f97316", borderRadius: 14, padding: "14px 16px" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <span style={{ fontSize: "1.3rem", lineHeight: 1.2, flexShrink: 0 }}>⚠️</span>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: "0.9rem", color: "#9a3412" }}>
+                  Pedido modificado en Finnegans
+                </p>
+                <p style={{ margin: "0 0 8px", fontSize: "0.79rem", color: "#c2410c" }}>
+                  Los ítems ya preparados están pre-tildados. Revisá los cambios:
+                </p>
+                <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 3 }}>
+                  {items.map((it, idx) => (
+                    <li key={idx} style={{
+                      fontSize: "0.79rem", fontWeight: 600,
+                      color: it.tipo === "add" ? "#15803d" : it.tipo === "del" ? "#dc2626" : "#b45309",
+                    }}>
+                      {it.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
             <button
               type="button"
-              className="btn btn--secondary btn-sm w-full"
-              onClick={() => setScanForKey(key)}
+              onClick={() => setModBannerDismissed(true)}
+              style={{
+                marginTop: 12, width: "100%", padding: "9px",
+                background: "#fed7aa", border: "none", borderRadius: 10,
+                fontWeight: 700, fontSize: "0.84rem", color: "#9a3412", cursor: "pointer",
+              }}
             >
-              Escanear paquete
+              Entendido
             </button>
           </div>
-        </div>
+        );
+      })()}
+
+      {/* Lista de productos */}
+      <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {(productos || []).length === 0 ? (
+          <p style={{ textAlign: "center", color: "#94a3b8", padding: "40px 0" }}>Sin productos</p>
+        ) : (
+          (productos || []).map((it, i) => renderProducto(it, i))
+        )}
+
+        {/* Marcar todo — solo si quedan pendientes */}
+        {totalItems > 0 && !allChecked && (
+          <button
+            type="button"
+            onClick={marcarTodo}
+            style={{
+              width: "100%", padding: "10px",
+              background: "transparent", border: "1.5px dashed #cbd5e1",
+              borderRadius: 12, color: "#64748b",
+              fontSize: "0.82rem", fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            Marcar todos como cargados
+          </button>
+        )}
       </div>
-    );
-  }
 
-  // === Render principal del panel
-  return (
-    <div className="space-y-3">
-      {(productos || []).map((it, i) => lite ? renderItemLite(it, i) : renderItemFull(it, i))}
+      {/* Espaciador para barra fija */}
+      <div style={{ height: 100 }} />
 
-      {/* Acciones finales */}
-      {/* Espaciador para que el contenido no quede tapado por la barra fija */}
-      <div style={{ height: lite ? (allChecked ? 120 : 160) : 120 }} />
-
-      {/* ── Barra fija inferior ── */}
+      {/* ── Barra fija inferior ───────────────────────────────── */}
       <div style={{
         position: "fixed", bottom: 0, left: 0, right: 0,
-        background: "#fff",
-        borderTop: "1px solid #e2e8f0",
-        boxShadow: "0 -4px 16px rgba(0,0,0,0.08)",
-        padding: "10px 16px 20px",
+        background: "#fff", borderTop: "1px solid #e2e8f0",
+        boxShadow: "0 -4px 20px rgba(0,0,0,0.08)",
+        padding: "12px 16px 20px",
         display: "flex", flexDirection: "column", gap: 8,
         zIndex: 50,
       }}>
-        {lite ? (
-          <>
-            {!allChecked && (productos || []).length > 0 && (
-              <p style={{ margin: 0, fontSize: "0.78rem", color: "#b45309", background: "#fef9c3", borderRadius: 8, padding: "5px 10px", textAlign: "center" }}>
-                Tildar todos los ítems para continuar
-              </p>
-            )}
-            {!allChecked && (
-              <button
-                onClick={marcarTodo}
-                style={{
-                  background: "transparent", border: "1.5px solid #cbd5e1", borderRadius: 10,
-                  padding: "7px 0", fontSize: "0.82rem", fontWeight: 600, color: "#475569",
-                  cursor: "pointer", width: "100%",
-                }}
-              >
-                Marcar todo
-              </button>
-            )}
-            <button
-              disabled={!allChecked}
-              onClick={onPreparacionFinalizada}
-              style={{
-                background: allChecked ? "#0f172a" : "#e2e8f0",
-                color: allChecked ? "#fff" : "#94a3b8",
-                border: "none", borderRadius: 14,
-                padding: "16px 0", width: "100%",
-                fontSize: "1.05rem", fontWeight: 700,
-                cursor: allChecked ? "pointer" : "not-allowed",
-                transition: "background 0.15s",
-              }}
-            >
-              {btnFinalizarLabel || "Pedido completado"}
-            </button>
-          </>
-        ) : (
-          <button
-            style={{
-              background: "#0f172a", color: "#fff",
-              border: "none", borderRadius: 14,
-              padding: "16px 0", width: "100%",
-              fontSize: "1.05rem", fontWeight: 700,
-              cursor: "pointer",
-            }}
-            onClick={async () => {
-              try {
-                await confirmarPedidoConStock({ pedido, prep });
-                onPreparacionFinalizada();
-              } catch (e) {
-                setModalError({ title: "Error", message: e?.message || "No se pudo finalizar" });
-              }
-            }}
-          >
-            {btnFinalizarLabel || "Finalizar preparación"}
-          </button>
-        )}
+        <button
+          type="button"
+          disabled={!allChecked}
+          onClick={onPreparacionFinalizada}
+          style={{
+            width: "100%", padding: "15px", borderRadius: 14, border: "none",
+            background: allChecked ? "#16a34a" : "#e2e8f0",
+            color: allChecked ? "#fff" : "#94a3b8",
+            fontWeight: 700, fontSize: "1rem",
+            cursor: allChecked ? "pointer" : "not-allowed",
+            transition: "all 0.2s ease",
+          }}
+        >
+          {allChecked
+            ? `✓ ${btnFinalizarLabel || "Pedido completado"}`
+            : `Faltan ${totalItems - checkedCount} producto${totalItems - checkedCount !== 1 ? "s" : ""}`}
+        </button>
 
-        {/* Botón de error — siempre visible durante preparación */}
         {onReportarError && (
           <button
+            type="button"
             onClick={() => setShowErrPanel(true)}
             style={{
-              background: "none", border: "none",
-              color: "#dc2626", fontSize: "0.82rem", fontWeight: 600,
-              cursor: "pointer", padding: "2px 0", textAlign: "center",
-              textDecoration: "underline", textDecorationColor: "#fca5a5",
+              background: "none", border: "none", color: "#ef4444",
+              fontSize: "0.82rem", fontWeight: 600, cursor: "pointer",
+              padding: "2px 0", textAlign: "center",
             }}
           >
             ⚠️ Hay un problema con este pedido
@@ -336,7 +373,7 @@ function EncPreparacionPanel({
         )}
       </div>
 
-      {/* ── Overlay: reportar error ── */}
+      {/* ── Overlay: reportar error ──────────────────────────── */}
       {showErrPanel && (
         <div
           onClick={() => { setShowErrPanel(false); setErrProductos([]); setExpandedProdKey(null); setPendingTipo(null); setPendingCant(""); }}
@@ -344,32 +381,22 @@ function EncPreparacionPanel({
         >
           <div
             onClick={e => e.stopPropagation()}
-            style={{
-              background: "#fff", width: "100%",
-              borderRadius: "20px 20px 0 0",
-              padding: "20px 16px 32px",
-            }}
+            style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "20px 16px 32px" }}
           >
-            <div style={{ width: "36px", height: "4px", background: "#e2e8f0", borderRadius: "999px", margin: "0 auto 18px" }} />
+            <div style={{ width: 36, height: 4, background: "#e2e8f0", borderRadius: 999, margin: "0 auto 18px" }} />
             <h3 style={{ margin: "0 0 4px", fontSize: "1rem", fontWeight: 800, color: "#0f172a" }}>⚠️ Reportar problema</h3>
             <p style={{ margin: "0 0 16px", fontSize: "0.82rem", color: "#64748b" }}>
-              Seleccioná los productos con problema. El pedido pasará a "Con error" y ventas será notificado.
+              Seleccioná los productos con problema. Ventas será notificado.
             </p>
-
-            <p style={{ margin: "0 0 8px", fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Productos con problema
-            </p>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "16px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
               {(productos || []).map((it, idx) => {
-                const nombre = it.descripcion || it.desc || it.nombre || it.cod || it.codigo || "—";
-                const cant = it.cant ?? it.cantidad ?? it.qty ?? 0;
-                const cod = it.cod || it.codigo || it.codigoURU || "";
+                const nombre  = it.descripcion || it.desc || it.nombre || it.cod || it.codigo || "—";
+                const cant    = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                const cod     = it.cod || it.codigo || it.codigoURU || "";
                 const prodKey = `${cod}-${idx}`;
-                const confirmed = errProductos.find(p => p.key === prodKey);
+                const confirmed  = errProductos.find(p => p.key === prodKey);
                 const isExpanded = expandedProdKey === prodKey;
-                const TIPO_LABELS_SHORT = { sin_stock: "Sin stock", danado: "Dañado", hay_menos: "Hay menos" };
-
+                const SHORT = { sin_stock: "Sin stock", danado: "Dañado", hay_menos: "Hay menos" };
                 return (
                   <div key={prodKey}>
                     <button
@@ -386,11 +413,11 @@ function EncPreparacionPanel({
                       }}
                       style={{
                         width: "100%", textAlign: "left", padding: "10px 12px",
-                        borderRadius: confirmed || isExpanded ? "10px 10px 0 0" : "10px",
+                        borderRadius: confirmed || isExpanded ? "10px 10px 0 0" : 10,
                         cursor: "pointer", fontFamily: "inherit",
                         border: confirmed ? "1.5px solid #ea580c" : isExpanded ? "1.5px solid #f97316" : "1.5px solid #e2e8f0",
-                        background: confirmed ? "#fff7ed" : isExpanded ? "#fff7ed" : "#f8fafc",
-                        display: "flex", alignItems: "center", gap: "8px",
+                        background: confirmed || isExpanded ? "#fff7ed" : "#f8fafc",
+                        display: "flex", alignItems: "center", gap: 8,
                       }}
                     >
                       <span style={{ flex: 1, fontSize: "0.85rem", fontWeight: confirmed ? 700 : 500, color: confirmed ? "#9a3412" : "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -398,34 +425,29 @@ function EncPreparacionPanel({
                       </span>
                       <span style={{ fontSize: "0.78rem", color: "#94a3b8", flexShrink: 0 }}>x{cant}</span>
                       {confirmed ? (
-                        <span style={{ fontSize: "0.68rem", fontWeight: 700, padding: "2px 8px", borderRadius: "999px", background: "#ea580c", color: "#fff", flexShrink: 0, whiteSpace: "nowrap" }}>
-                          {confirmed.tipo === "hay_menos" && confirmed.cant ? `Hay menos (${confirmed.cant})` : TIPO_LABELS_SHORT[confirmed.tipo] || confirmed.tipo} ✕
+                        <span style={{ fontSize: "0.68rem", fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#ea580c", color: "#fff", flexShrink: 0, whiteSpace: "nowrap" }}>
+                          {confirmed.tipo === "hay_menos" && confirmed.cant ? `Hay menos (${confirmed.cant})` : SHORT[confirmed.tipo] || confirmed.tipo} ✕
                         </span>
                       ) : (
                         <span style={{ color: isExpanded ? "#f97316" : "#94a3b8", fontSize: "0.9rem", flexShrink: 0 }}>{isExpanded ? "▲" : "+"}</span>
                       )}
                     </button>
-
                     {isExpanded && !confirmed && (
-                      <div style={{ border: "1.5px solid #f97316", borderTop: "none", borderRadius: "0 0 10px 10px", background: "#fff7ed", padding: "12px" }}>
-                        <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#c2410c", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                          ¿Cuál es el problema?
-                        </p>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                      <div style={{ border: "1.5px solid #f97316", borderTop: "none", borderRadius: "0 0 10px 10px", background: "#fff7ed", padding: 12 }}>
+                        <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#c2410c", textTransform: "uppercase", letterSpacing: "0.05em" }}>¿Cuál es el problema?</p>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                           {[
                             { id: "sin_stock", label: "No hay stock",           icon: "❌" },
                             { id: "danado",    label: "Está dañado / abollado", icon: "💢" },
                             { id: "hay_menos", label: "Hay menos de lo pedido", icon: "📉" },
                           ].map(op => (
-                            <button
-                              key={op.id} type="button"
+                            <button key={op.id} type="button"
                               onClick={() => { setPendingTipo(op.id); if (op.id !== "hay_menos") setPendingCant(""); }}
                               style={{
-                                width: "100%", textAlign: "left", padding: "9px 12px",
-                                borderRadius: "8px", cursor: "pointer", fontFamily: "inherit",
+                                width: "100%", textAlign: "left", padding: "9px 12px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
                                 border: pendingTipo === op.id ? "1.5px solid #dc2626" : "1.5px solid #fdba74",
                                 background: pendingTipo === op.id ? "#fef2f2" : "#fff",
-                                display: "flex", alignItems: "center", gap: "8px",
+                                display: "flex", alignItems: "center", gap: 8,
                               }}
                             >
                               <span>{op.icon}</span>
@@ -434,66 +456,49 @@ function EncPreparacionPanel({
                             </button>
                           ))}
                         </div>
-
                         {pendingTipo === "hay_menos" && (
-                          <div style={{ marginTop: "10px" }}>
+                          <div style={{ marginTop: 10 }}>
                             <p style={{ margin: "0 0 4px", fontSize: "0.7rem", fontWeight: 700, color: "#c2410c", textTransform: "uppercase" }}>¿Cuántas hay? (opcional)</p>
-                            <input
-                              type="number" min="0" value={pendingCant}
-                              onChange={e => setPendingCant(e.target.value)}
-                              placeholder="0"
-                              style={{ width: "100%", boxSizing: "border-box", border: "1.5px solid #fdba74", borderRadius: "8px", padding: "8px 10px", fontSize: "0.95rem", outline: "none", fontFamily: "inherit" }}
-                            />
+                            <input type="number" min="0" value={pendingCant} onChange={e => setPendingCant(e.target.value)} placeholder="0"
+                              style={{ width: "100%", boxSizing: "border-box", border: "1.5px solid #fdba74", borderRadius: 8, padding: "8px 10px", fontSize: "0.95rem", outline: "none", fontFamily: "inherit" }} />
                           </div>
                         )}
-
-                        <button
-                          type="button"
-                          disabled={!pendingTipo}
+                        <button type="button" disabled={!pendingTipo}
                           onClick={() => {
                             if (!pendingTipo) return;
                             setErrProductos(prev => [...prev, { key: prodKey, cod, nombre, tipo: pendingTipo, cant: pendingCant }]);
                             setExpandedProdKey(null); setPendingTipo(null); setPendingCant("");
                           }}
                           style={{
-                            marginTop: "10px", width: "100%", padding: "10px",
-                            borderRadius: "8px", border: "none", fontFamily: "inherit",
+                            marginTop: 10, width: "100%", padding: 10, borderRadius: 8, border: "none", fontFamily: "inherit",
                             background: pendingTipo ? "#ea580c" : "#e2e8f0",
                             color: pendingTipo ? "#fff" : "#94a3b8",
                             fontWeight: 700, fontSize: "0.88rem",
                             cursor: pendingTipo ? "pointer" : "not-allowed",
                           }}
-                        >
-                          Confirmar problema →
-                        </button>
+                        >Confirmar problema →</button>
                       </div>
                     )}
                   </div>
                 );
               })}
             </div>
-
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                onClick={() => { setShowErrPanel(false); setErrProductos([]); setExpandedProdKey(null); setPendingTipo(null); setPendingCant(""); }}
-                style={{ flex: 1, padding: "13px", borderRadius: "12px", border: "1.5px solid #e2e8f0", background: "#f8fafc", color: "#64748b", fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" }}
-              >
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => { setShowErrPanel(false); setErrProductos([]); setExpandedProdKey(null); setPendingTipo(null); setPendingCant(""); }}
+                style={{ flex: 1, padding: 13, borderRadius: 12, border: "1.5px solid #e2e8f0", background: "#f8fafc", color: "#64748b", fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" }}>
                 Cancelar
               </button>
-              <button
-                disabled={savingErr || errProductos.length === 0}
+              <button disabled={savingErr || errProductos.length === 0}
                 onClick={async () => {
                   setSavingErr(true);
                   try {
                     await onReportarError({ productos: errProductos });
                     setShowErrPanel(false);
                     setErrProductos([]); setExpandedProdKey(null); setPendingTipo(null); setPendingCant("");
-                  } finally {
-                    setSavingErr(false);
-                  }
+                  } finally { setSavingErr(false); }
                 }}
                 style={{
-                  flex: 2, padding: "13px", borderRadius: "12px", border: "none",
+                  flex: 2, padding: 13, borderRadius: 12, border: "none",
                   background: savingErr || errProductos.length === 0 ? "#e2e8f0" : "#dc2626",
                   color: savingErr || errProductos.length === 0 ? "#94a3b8" : "#fff",
                   fontWeight: 700, fontSize: "0.9rem",
@@ -505,66 +510,6 @@ function EncPreparacionPanel({
             </div>
           </div>
         </div>
-      )}
-
-      {/* Overlay de escaneo (idéntico al Operario) */}
-      {scanForKey && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center" style={{ background: "rgba(0,0,0,.62)" }}>
-          <div className="card w-[92%] max-w-[520px]">
-            <div className="order-head"><div className="order-number">Escanear paquete</div></div>
-            <div className="order-body">
-              <QrScanner
-                onClose={() => setScanForKey(null)}
-                onRead={(payload) => {
-                  // payload esperado: { codigo_urualum, cantidad }
-                  const uru = scanForKey.split("-")[0];
-                  if (String(payload?.codigo_urualum) !== String(uru)) {
-                    setModalError({
-                      title: "Paquete incorrecto",
-                      message: "El QR no corresponde a este producto."
-                    });
-                    return;
-                  }
-                  const packSize = Number(payload?.cantidad || 0);
-                  const usados = (prep[scanForKey]?.usarSueltas || 0) + (prep[scanForKey]?.usarDePaquete || 0);
-                  const need = needMap[scanForKey] || 0;
-                  const remain = Math.max(0, need - usados);
-
-                  setPrep(prev => ({
-                    ...prev,
-                    [scanForKey]: { ...(prev[scanForKey] || {}), paquete: { packSize } }
-                  }));
-                  setModalPack({ key: scanForKey, packSize, remain });
-                  setScanForKey(null);
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal confirmar paquete */}
-      {modalPack && (
-        <PackConfirmModal
-          keyId={modalPack.key}
-          packSize={modalPack.packSize}
-          remain={modalPack.remain}
-          value={prep[modalPack.key]?.usarDePaquete || 0}
-          onCancel={() => setModalPack(null)}
-          onConfirm={(val) => {
-            setPrep(prev => ({ ...prev, [modalPack.key]: { ...(prev[modalPack.key] || {}), usarDePaquete: val } }));
-            setModalPack(null);
-          }}
-        />
-      )}
-
-      {/* Modal error */}
-      {modalError && (
-        <PackErrorModal
-          title={modalError.title}
-          message={modalError.message}
-          onClose={() => setModalError(null)}
-        />
       )}
     </div>
   );
