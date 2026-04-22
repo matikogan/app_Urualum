@@ -2226,65 +2226,115 @@ const filteredOperarios = useMemo(() => {
             </div>
           </div>
 
-          {/* Banner error reportado por operario */}
-          <div style={{ background: "#fff7ed", border: "1.5px solid #fed7aa", borderRadius: "14px", padding: "16px 20px", marginBottom: "14px" }}>
-            <p style={{ margin: "0 0 6px", fontSize: "0.78rem", fontWeight: 700, color: "#c2410c", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              ⚠️ El operario reportó un problema
-            </p>
-            <p style={{ margin: 0, fontSize: "0.88rem", color: "#9a3412", lineHeight: 1.5 }}>
-              Revisá los productos con error. Podés <strong>confirmar el error</strong> para notificar a ventas, o <strong>devolver a preparación</strong> si el operario puede resolverlo.
-            </p>
+          {/* ── Detalle del error reportado ── */}
+          <div style={{ background: "#fff7ed", border: "2px solid #f97316", borderRadius: "14px", overflow: "hidden", marginBottom: "14px" }}>
+
+            {/* Cabecera */}
+            <div style={{ background: "#fff7ed", borderBottom: "1px solid #fed7aa", padding: "12px 16px", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "1.1rem" }}>⚠️</span>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontSize: "0.78rem", fontWeight: 700, color: "#c2410c", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  {errorProds.length > 0 ? `${errorProds.length} producto${errorProds.length !== 1 ? "s" : ""} con error` : "Problema reportado"}
+                </p>
+                <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "#9a3412" }}>
+                  Reportado por <strong>{pedido.operarioNombre || "el operario"}</strong>
+                </p>
+              </div>
+            </div>
+
+            {/* Nota del operario — siempre visible y prominente */}
             {pedido.errorDetalle && (
-              <div style={{ marginTop: "10px", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: "8px", padding: "10px 12px" }}>
-                <p style={{ margin: 0, fontSize: "0.78rem", fontWeight: 700, color: "#92400e", marginBottom: "4px" }}>Nota del operario</p>
-                <p style={{ margin: 0, fontSize: "0.85rem", color: "#78350f", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{pedido.errorDetalle}</p>
+              <div style={{ borderBottom: errorProds.length > 0 ? "1px solid #fed7aa" : "none", padding: "14px 16px", background: "#fef3c7" }}>
+                <p style={{ margin: "0 0 4px", fontSize: "0.68rem", fontWeight: 700, color: "#92400e", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  📝 Descripción del problema
+                </p>
+                <p style={{ margin: 0, fontSize: "0.92rem", color: "#78350f", whiteSpace: "pre-wrap", lineHeight: 1.6, fontStyle: "italic" }}>
+                  "{pedido.errorDetalle}"
+                </p>
               </div>
             )}
-          </div>
 
-          {/* Productos con error destacados */}
-          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden", marginBottom: "14px" }}>
-            <div style={{ padding: "12px 16px", borderBottom: "1px solid #f1f5f9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Productos · {productos.length}
-              </span>
-              {errorProds.length > 0 && (
-                <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#c2410c", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "999px", padding: "2px 8px" }}>
-                  {errorProds.length} con error
-                </span>
-              )}
-            </div>
-            {productos.map((it, i) => {
-              const cod     = it.cod || it.codigo || "";
-              const nombre  = it.descripcion || it.desc || it.nombre || cod || "—";
-              const qty     = it.cant ?? it.cantidad ?? it.qty ?? 0;
-              const errInfo = errorProds.find(p => (p.cod && p.cod === cod) || p.nombre === nombre);
+            {/* Productos con error — uno por fila, bien detallado */}
+            {errorProds.length > 0 && errorProds.map((errInfo, i) => {
+              // Buscar datos completos del producto en el pedido
+              const prodCompleto = productos.find(p => {
+                const cod = p.cod || p.codigo || "";
+                return (errInfo.cod && errInfo.cod === cod) || p.descripcion === errInfo.nombre || p.desc === errInfo.nombre;
+              });
+              const nombre = errInfo.nombre || prodCompleto?.descripcion || prodCompleto?.desc || errInfo.cod || "—";
+              const qty    = prodCompleto?.cant ?? prodCompleto?.cantidad ?? prodCompleto?.qty ?? null;
+
               return (
                 <div key={i} style={{
-                  display: "flex", alignItems: "flex-start", gap: "12px",
-                  padding: "12px 16px",
-                  borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none",
-                  background: errInfo ? "#fff7ed" : "#fff",
-                  borderLeft: `4px solid ${errInfo ? "#c2410c" : "transparent"}`,
+                  padding: "14px 16px",
+                  borderBottom: i < errorProds.length - 1 ? "1px solid #fed7aa" : "none",
+                  background: "#fff7ed",
                 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: errInfo ? 700 : 500, color: errInfo ? "#9a3412" : "#1e293b" }}>
-                      {errInfo && <span style={{ marginRight: "4px" }}>⚠️</span>}{nombre}
+                  {/* Nombre del producto */}
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px", marginBottom: "8px" }}>
+                    <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: "#9a3412", flex: 1, lineHeight: 1.4 }}>
+                      {nombre}
                     </p>
-                    {errInfo?.tipo && (
-                      <p style={{ margin: "3px 0 0", fontSize: "0.78rem", color: "#c2410c", fontWeight: 600 }}>
-                        {TIPO_LABELS[errInfo.tipo] || errInfo.tipo}
-                        {errInfo.tipo === "hay_menos" && errInfo.cant ? ` · disponibles: ${errInfo.cant}` : ""}
-                      </p>
+                    {qty !== null && (
+                      <span style={{ flexShrink: 0, background: "#fed7aa", color: "#9a3412", fontWeight: 700, fontSize: "0.82rem", padding: "3px 9px", borderRadius: "8px" }}>
+                        ×{qty}
+                      </span>
                     )}
                   </div>
-                  <span style={{ flexShrink: 0, fontWeight: 700, fontSize: "0.82rem", padding: "3px 9px", borderRadius: "8px", background: errInfo ? "#fed7aa" : "#f1f5f9", color: errInfo ? "#9a3412" : "#475569" }}>
-                    ×{qty}
-                  </span>
+                  {/* Tipo de error — pill prominente */}
+                  {errInfo.tipo && (
+                    <span style={{
+                      display: "inline-block",
+                      fontSize: "0.76rem", fontWeight: 700,
+                      background: "#dc2626", color: "#fff",
+                      padding: "3px 10px", borderRadius: "999px",
+                      letterSpacing: "0.03em",
+                    }}>
+                      {TIPO_LABELS[errInfo.tipo] || errInfo.tipo}
+                      {errInfo.tipo === "hay_menos" && errInfo.cant ? ` — disponibles: ${errInfo.cant}` : ""}
+                    </span>
+                  )}
                 </div>
               );
             })}
           </div>
+
+          {/* ── Resto de los productos (contexto) ── */}
+          {productos.filter(it => {
+            const cod    = it.cod || it.codigo || "";
+            const nombre = it.descripcion || it.desc || it.nombre || "";
+            return !errorProds.find(p => (p.cod && p.cod === cod) || p.nombre === nombre);
+          }).length > 0 && (
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden", marginBottom: "14px" }}>
+              <div style={{ padding: "10px 16px", borderBottom: "1px solid #f1f5f9" }}>
+                <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Resto del pedido ({productos.length - errorProds.length} producto{productos.length - errorProds.length !== 1 ? "s" : ""} sin error)
+                </span>
+              </div>
+              {productos
+                .filter(it => {
+                  const cod    = it.cod || it.codigo || "";
+                  const nombre = it.descripcion || it.desc || it.nombre || "";
+                  return !errorProds.find(p => (p.cod && p.cod === cod) || p.nombre === nombre);
+                })
+                .map((it, i, arr) => {
+                  const nombre = it.descripcion || it.desc || it.nombre || it.cod || "—";
+                  const qty    = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                  return (
+                    <div key={i} style={{
+                      display: "flex", alignItems: "center", gap: "12px",
+                      padding: "10px 16px",
+                      borderBottom: i < arr.length - 1 ? "1px solid #f8fafc" : "none",
+                    }}>
+                      <span style={{ flex: 1, fontSize: "0.85rem", color: "#64748b" }}>{nombre}</span>
+                      <span style={{ flexShrink: 0, fontSize: "0.8rem", fontWeight: 600, background: "#f1f5f9", color: "#64748b", padding: "2px 8px", borderRadius: "6px" }}>
+                        ×{qty}
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
         </div>
 
         {/* Botones fijos */}
