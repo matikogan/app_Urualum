@@ -3,18 +3,21 @@ import { db } from "../../../utils/firebase";
 import { ORDEN_ESTADOS } from "./agrupaciones";
 
 export const ESTADOS = {
-  PENDIENTE_ASIGNAR: "PENDIENTE_ASIGNAR",
-  ASIGNADO: "ASIGNADO",
-  EN_PREPARACION: "EN_PREPARACION",
-  PREPARADO: "PREPARADO",
-  CONTROLADO: "CONTROLADO",
-  DESPACHADO: "DESPACHADO",
-  ANULADO: "ANULADO",
+  PENDIENTE_ASIGNAR:  "PENDIENTE_ASIGNAR",
+  ASIGNADO:           "ASIGNADO",
+  EN_PREPARACION:     "EN_PREPARACION",
+  CON_ERROR:          "CON_ERROR",           // R8: encargado revisa antes de escalar
+  ERROR_CONFIRMADO:   "ERROR_CONFIRMADO",    // R8: encargado confirmó → ventas actúa
+  PREPARADO:          "PREPARADO",
+  CONTROLADO:         "CONTROLADO",
+  DESPACHADO:         "DESPACHADO",
+  ANULADO:            "ANULADO",
+  CANCELADO:          "CANCELADO",
 };
 
 export function puedeTransicionar(de, a) {
-  // ANULADO siempre es destino válido (desde cualquier estado)
-  if (a === "ANULADO") return true;
+  // Destinos siempre válidos sin importar el estado actual
+  if (a === "ANULADO" || a === "CON_ERROR" || a === "ERROR_CONFIRMADO" || a === "CANCELADO") return true;
   const order = new Map(ORDEN_ESTADOS.map((e,i)=>[e,i]));
   return (order.get(a) ?? 999) >= (order.get(de) ?? -1);
 }

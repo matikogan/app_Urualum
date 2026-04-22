@@ -167,8 +167,10 @@ export async function despacharPedido({ pedidoId, usuario, useCallable = false }
   if (!snap.exists()) throw new Error("Pedido no encontrado");
   const pedido = snap.data();
 
-  if (pedido.estado !== ESTADOS.CONTROLADO) {
-    throw new Error("Solo se puede despachar un pedido en estado CONTROLADO.");
+  // ISABELA: se despacha desde PREPARADO. R8: desde CONTROLADO.
+  const estadosValidos = [ESTADOS.CONTROLADO, ESTADOS.PREPARADO];
+  if (!estadosValidos.includes(pedido.estado)) {
+    throw new Error("Solo se puede despachar un pedido preparado o controlado.");
   }
 
   // 1) Traer cabecera cruda de Finnegans por número (amplia ventana)

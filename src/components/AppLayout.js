@@ -7,7 +7,8 @@ export default function AppLayout() {
   return (
     <div style={{ minHeight: "100vh", background: "#fafafa" }}>
       <TopBar />
-      <main style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
+      {/* Sin maxWidth ni padding — cada página gestiona su propio layout */}
+      <main>
         <Outlet />
       </main>
     </div>

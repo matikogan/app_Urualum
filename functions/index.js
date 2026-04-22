@@ -180,22 +180,22 @@ exports.notificarErrorPreparacion = onDocumentCreated(
 
     logger.info("Error preparación:", numero);
 
-    const usersSnap = await db
-      .collection("users")
-      .where("rol", "==", "encargado")
-      .where("deposito", "==", deposito)
-      .get();
+    // Notificar a ventas Y encargado del mismo depósito
+    const [ventasSnap, encargadoSnap] = await Promise.all([
+      db.collection("users").where("rol", "==", "ventas").where("deposito", "==", deposito).get(),
+      db.collection("users").where("rol", "==", "encargado").where("deposito", "==", deposito).get(),
+    ]);
 
     const tokens = [];
-    usersSnap.forEach((doc) => {
+    [...ventasSnap.docs, ...encargadoSnap.docs].forEach((doc) => {
       const t = doc.data().fcmToken;
       if (t) tokens.push(t);
     });
 
     await sendPushNotification(tokens, {
-      title: "Error en preparación",
+      title: "⚠️ Error en preparación",
       body: `${numero}: ${detalle}`,
-      click_action: "https://app.urualum.uy/encargado/errores",
+      click_action: "https://app.urualum.uy/ventas/para-despachar",
     });
   }
 );
@@ -688,8 +688,50 @@ function resolverCondicionPagoCod(nombre) {
 
 function extraerCodigoProd(raw) {
   if (!raw) return "";
-  const match = String(raw).trim().match(/^(\d+)/);
-  return match ? match[1] : String(raw).trim();
+  const s = String(raw).trim();
+  // Intento 1: prefijo numérico  "512523 Descripcion" → "512523"
+  const numMatch = s.match(/^(\d+)\s/);
+  if (numMatch) return numMatch[1];
+  // Intento 2: token alfanumérico sin espacios al inicio "PERFAB Descripcion" → "PERFAB"
+  const alphaMatch = s.match(/^([A-Z0-9_-]+)\s/i);
+  if (alphaMatch) return alphaMatch[1];
+  // Fallback: devolver tal cual (puede ser solo descripción, se valida después)
+  return s;
+}
+
+function esCodValido(cod) {
+  // Un código válido no tiene espacios y no es una oración en español
+  if (!cod) return false;
+  if (cod.includes(" ")) return false;   // "Perfiles Abollados" → false
+  if (cod.length > 30) return false;
+  return true;
+}
+
+// Busca el código Finnegans de un producto por su descripción usando GET /producto/list
+async function resolverCodigoProducto(desc, token) {
+  if (!desc) return null;
+  try {
+    const url = `${FINN_API_BASE}/producto/list?ACCESS_TOKEN=${encodeURIComponent(token)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const txt = await res.text();
+    let lista;
+    try { lista = JSON.parse(txt); } catch { return null; }
+    if (!Array.isArray(lista)) return null;
+
+    const descNorm = desc.toLowerCase().trim();
+    // Buscar coincidencia exacta o parcial en nombre/descripción
+    const encontrado = lista.find(p => {
+      const nombre = String(p.Nombre || p.nombre || p.DESCRIPCION || p.descripcion || "").toLowerCase();
+      return nombre === descNorm || nombre.includes(descNorm) || descNorm.includes(nombre);
+    });
+    const cod = encontrado?.Codigo || encontrado?.codigo || encontrado?.PRODUCTOCODIGO || null;
+    if (cod) logger.info(`[resolverCodigoProducto] "${desc}" → "${cod}"`);
+    return cod ? String(cod) : null;
+  } catch (e) {
+    logger.warn(`[resolverCodigoProducto] error buscando "${desc}":`, e.message);
+    return null;
+  }
 }
 
 async function getFinnToken() {
@@ -701,11 +743,53 @@ async function getFinnToken() {
   return token;
 }
 
+/**
+ * Llama a GET /cliente/{codigo} y devuelve { rut, condicionPagoCod }
+ * Un solo request resuelve tanto el RUT como la condición de pago default del cliente.
+ */
+async function getClienteInfo(clienteCodigo, token) {
+  if (!clienteCodigo) return {};
+  try {
+    const url = `${FINN_API_BASE}/cliente/${encodeURIComponent(clienteCodigo)}?ACCESS_TOKEN=${encodeURIComponent(token)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      logger.warn(`[despacharEnFinnegans] GET /cliente/${clienteCodigo} → ${res.status}`);
+      return {};
+    }
+    const txt = await res.text();
+    let data;
+    try { data = JSON.parse(txt); } catch { return {}; }
+
+    // Según la documentación oficial: el RUT está en IdentificacionTributariaNumero
+    const rut = String(
+      data?.IdentificacionTributariaNumero || data?.IdentificacionTributaria?.Numero ||
+      data?.NroDeIdentificacion || data?.NRODEIDENTIFICACION ||
+      data?.Rut || data?.RUT || data?.rut || ""
+    ).trim() || null;
+
+    // Condición de pago del cliente: puede venir como código o como nombre
+    const cpNombre = String(
+      data?.CondicionPago || data?.CONDICIONPAGO ||
+      data?.CondicionPagoNombre || data?.condicionPago || ""
+    ).trim() || null;
+    const cpCod = String(
+      data?.CondicionPagoCodigo || data?.CONDICIONPAGOCODIGO ||
+      data?.condicionPagoCodigo || ""
+    ).trim() || resolverCondicionPagoCod(cpNombre) || null;
+
+    logger.info(`[despacharEnFinnegans] Cliente ${clienteCodigo} → RUT=${rut} | condicionPago=${cpCod || cpNombre}`);
+    return { rut, condicionPagoCod: cpCod, condicionPagoNombre: cpNombre };
+  } catch (e) {
+    logger.warn(`[despacharEnFinnegans] No se pudo obtener info del cliente ${clienteCodigo}:`, e.message);
+    return {};
+  }
+}
+
 exports.despacharEnFinnegans = onCall({ region: "us-central1" }, async (request) => {
   // Solo usuarios autenticados
   if (!request.auth) throw new HttpsError("unauthenticated", "No autenticado");
 
-  const { pedidoId, modoTest = true } = request.data;
+  const { pedidoId, modoTest = true, clienteRUTOverride = null } = request.data;
   if (!pedidoId) throw new HttpsError("invalid-argument", "Falta pedidoId");
 
   // 1. Leer pedido de Firestore
@@ -713,22 +797,67 @@ exports.despacharEnFinnegans = onCall({ region: "us-central1" }, async (request)
   if (!pedidoSnap.exists) throw new HttpsError("not-found", `Pedido ${pedidoId} no encontrado`);
   const pedido = pedidoSnap.data();
 
-  // 2. Validar campos mínimos
-  const clienteRUT       = pedido.clienteRUT;
-  const condicionPagoCod = pedido.condicionPagoCod || resolverCondicionPagoCod(pedido.condicionPago);
-  const depositoApp      = pedido.deposito;
-  const depositoCod      = DEPOSITO_CODIGOS[depositoApp];
-  const productos        = Array.isArray(pedido.productos) ? pedido.productos : [];
-  const fecha            = new Date().toISOString().slice(0, 10); // hoy YYYY-MM-DD
+  // 2. Resolver campos necesarios
+  const depositoApp = pedido.deposito;
+  const depositoCod = DEPOSITO_CODIGOS[depositoApp];
+  const productos   = Array.isArray(pedido.productos) ? pedido.productos : [];
+  const fecha       = new Date().toISOString().slice(0, 10);
 
-  if (!clienteRUT)       throw new HttpsError("failed-precondition", "Falta clienteRUT en el pedido");
-  if (!condicionPagoCod) throw new HttpsError("failed-precondition", `No se pudo resolver condición de pago: "${pedido.condicionPago}"`);
-  if (!depositoCod)      throw new HttpsError("failed-precondition", `Depósito desconocido: "${depositoApp}"`);
+  if (!depositoCod)       throw new HttpsError("failed-precondition", `Depósito desconocido: "${depositoApp}"`);
   if (productos.length === 0) throw new HttpsError("failed-precondition", "El pedido no tiene productos");
 
-  // 3. Armar items
-  const items = productos.map(it => ({
-    ProductoCodigo:       extraerCodigoProd(it.cod),
+  // 2b. Resolver clienteRUT y condicionPagoCod
+  //     Primero usamos lo que hay en Firestore (o el override de test).
+  //     Si falta alguno y hay clienteCodigo, hacemos UN solo GET /cliente para enriquecer.
+  let clienteRUT     = clienteRUTOverride || pedido.clienteRUT || null;
+  let condicionPagoCod2 = pedido.condicionPagoCod || resolverCondicionPagoCod(pedido.condicionPago) || null;
+
+  const necesitaLookup = (!clienteRUT || !condicionPagoCod2) && pedido.clienteCodigo;
+  if (necesitaLookup) {
+    logger.info(`[despacharEnFinnegans] Enriqueciendo desde /cliente/${pedido.clienteCodigo}…`);
+    const tokenTemp  = await getFinnToken();
+    const info       = await getClienteInfo(pedido.clienteCodigo, tokenTemp);
+    if (!clienteRUT        && info.rut)            clienteRUT        = info.rut;
+    if (!condicionPagoCod2 && info.condicionPagoCod) condicionPagoCod2 = info.condicionPagoCod;
+
+    // Persistir lo que encontramos para la próxima vez
+    const patch = {};
+    if (info.rut)            patch.clienteRUT        = info.rut;
+    if (info.condicionPagoCod) patch.condicionPagoCod = info.condicionPagoCod;
+    if (Object.keys(patch).length > 0) {
+      await db.collection("pedidos").doc(pedidoId).update(patch);
+    }
+  }
+
+  if (!clienteRUT)        throw new HttpsError("failed-precondition", `No se pudo obtener el RUT del cliente. clienteCodigo="${pedido.clienteCodigo || "ausente"}"`);
+  if (!condicionPagoCod2) throw new HttpsError("failed-precondition", `No se pudo resolver condición de pago. Valor en pedido: "${pedido.condicionPago || "ausente"}"`);
+
+
+  // 3. Resolver códigos de productos (y buscar en Finnegans los que no tienen código válido)
+  // Hacemos un token temprano solo si hay productos sin código válido
+  const hayCodigosInvalidos = productos.some(it => !esCodValido(extraerCodigoProd(it.cod)));
+  const tokenItems = hayCodigosInvalidos ? await getFinnToken() : null;
+
+  const itemsResueltos = await Promise.all(productos.map(async it => {
+    let cod = extraerCodigoProd(it.cod);
+    if (!esCodValido(cod)) {
+      // El cod es una descripción — buscar el código real en Finnegans
+      const codResuelto = await resolverCodigoProducto(it.desc || it.cod, tokenItems);
+      if (codResuelto) {
+        cod = codResuelto;
+      } else {
+        throw new HttpsError("failed-precondition",
+          `No se encontró el código de producto para "${it.desc || it.cod}". Verificá que el producto exista en Finnegans.`
+        );
+      }
+    }
+    return { ...it, _codResuelto: cod };
+  }));
+
+  // 3b. Armar items con los códigos resueltos
+  const tokenFinal = modoTest ? null : (tokenItems || await getFinnToken());
+  const items = itemsResueltos.map(it => ({
+    ProductoCodigo:       it._codResuelto,
     Cantidad:             it.cant ?? it.cantidad ?? 0,
     Precio:               it.precioUSD ?? 0,
     Importe:              0,                          // Finnegans lo recalcula
@@ -753,7 +882,7 @@ exports.despacharEnFinnegans = onCall({ region: "us-central1" }, async (request)
     IdentificacionExterna:    pedidoId,
     Fecha:                    fecha,
     Cliente:                  clienteRUT,
-    CondicionPagoCodigo:      condicionPagoCod,
+    CondicionPagoCodigo:      condicionPagoCod2,
     NumeroDocumento:          "",               // Finnegans lo genera solo
     TransaccionTipoCodigo:    "OPER",
     TransaccionSubtipoCodigo: "REMVTA",
@@ -776,7 +905,7 @@ exports.despacharEnFinnegans = onCall({ region: "us-central1" }, async (request)
   }
 
   // 6. Llamar a Finnegans
-  const token = await getFinnToken();
+  const token = tokenFinal || await getFinnToken();
   const url   = `${FINN_API_BASE}/despachoVenta?ACCESS_TOKEN=${encodeURIComponent(token)}`;
   const res   = await fetch(url, {
     method:  "POST",

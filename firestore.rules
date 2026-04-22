@@ -2,11 +2,44 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // === Pedidos entregados — histórico permanente para analytics ===
+    match /pedidos_entregados/{id} {
+      allow read:   if isAuthed();
+      // Solo encargado (del mismo depósito) o admin pueden registrar una entrega
+      allow create: if isAuthed() && (
+        (isEncargado() && request.resource.data.deposito == userDeposito()) ||
+        isAdmin()
+      );
+      // Inmutable una vez registrado — correcciones solo por admin
+      allow update: if isAuthed() && isAdmin();
+      allow delete: if isAuthed() && isAdmin();
+    }
+
     // === Permitir mover pedidos despachados (nuevo histórico) ===
     match /pedidos_despachados/{id} {
-      allow create: if request.auth != null && userRole() == "ventas";
-      // Opcional si algún día querés leer desde la app
-      allow read: if request.auth != null;
+      allow create: if request.auth != null && (userRole() == "ventas" || userRole() == "encargado");
+      allow read:   if request.auth != null;
+
+      // Encargado ISABELA marca entrega/control: solo puede tocar estos campos
+      allow update: if request.auth != null && (
+        // Encargado de ISABELA confirma control físico
+        (isEncargado()
+          && resource.data.deposito == userDeposito()
+          && request.resource.data.diff(resource.data).changedKeys()
+               .hasOnly(['necesitaControl', 'controlFisicoAt', 'controladoPor']))
+        ||
+        // Admin puede hacer override del control (testing y correcciones)
+        (isAdmin()
+          && request.resource.data.diff(resource.data).changedKeys()
+               .hasOnly(['necesitaControl', 'controlFisicoAt', 'controladoPor', 'adminOverride']))
+      );
+
+      // Admin puede borrar (reset en testing)
+      // Encargado puede borrar pedidos DESPACHADOS de su depósito (fallback de migración)
+      allow delete: if request.auth != null && (
+        isAdmin() ||
+        (isEncargado() && resource.data.deposito == userDeposito())
+      );
     }
 
 
@@ -51,13 +84,14 @@ service cloud.firestore {
       // 2. Listar: Permitido para Staff (Encargado/Ventas)
       allow list: if isAuthed() && (isEncargado() || isVentas());
 
-      // 3. Leer (Get/List): 
+      // 3. Leer (Get/List):
       //    - Tu propio doc
-      //    - O si sos del Staff (Ventas/Encargado) podés leer a cualquiera (Clientes, Operarios, etc.)
+      //    - O si sos del Staff (Ventas/Encargado/Admin) podés leer a cualquiera
       allow read: if isAuthed() && (
         request.auth.uid == uid ||
-        isEncargado() || 
-        isVentas()
+        isEncargado() ||
+        isVentas()    ||
+        isAdmin()
       );
 
       // Escritura: Solo el propio usuario puede editar sus datos (o crear su perfil)
@@ -68,11 +102,10 @@ service cloud.firestore {
 
 
     // === CONFIG / FEATURE FLAGS ===
-    // Permite leer cualquier documento de la colección `config` si está autenticado.
-    // (ej.: /config/app, /config/flags, etc.)
     match /config/{docId} {
       allow read: if isAuthed();
-      allow write: if false;
+      // Admin puede escribir (ej: configurar rango de sync Finnegans)
+      allow write: if isAuthed() && isAdmin();
     }
 
 
@@ -154,9 +187,17 @@ service cloud.firestore {
     }
 
 
+    // === CAMIONES (salidas programadas al interior) ===
+    match /camiones/{id} {
+      // Lectura: cualquier usuario autenticado (el sync la necesita sin importar el rol)
+      allow read:   if isAuthed();
+      // Gestión: solo encargado y admin
+      allow create: if isAuthed() && (isEncargado() || isAdmin());
+      allow update: if isAuthed() && (isEncargado() || isAdmin());
+      allow delete: if isAuthed() && isAdmin();
+    }
+
     match /pedidos/{id} {
-
-
 
       // --- SYNC ---
       allow read: if request.auth != null;
@@ -173,18 +214,26 @@ service cloud.firestore {
 
       function onlyOperationalFieldsChanged() {
         return request.resource.data.diff(resource.data).changedKeys()
-          .hasOnly(['estado', 'operarioId', 'operarioNombre', 'updatedAt', 'timestamps']);
+          .hasOnly(['estado', 'operarioId', 'operarioNombre', 'updatedAt', 'timestamps', 'errorDetalle', 'errorProductoCod', 'errorProductoNombre', 'errorProductos']);
       }
 
       function nuevoEstado() {
         return request.resource.data.estado;
       }
 
-      // Encargado
+      // Encargado — estado / asignación operario
       function canEncargadoUpdate() {
         return isEncargado()
           && resource.data.deposito == userDeposito()
           && onlyOperationalFieldsChanged();
+      }
+
+      // Encargado — asignar / quitar camión
+      function canEncargadoCamionUpdate() {
+        return isEncargado()
+          && resource.data.deposito == userDeposito()
+          && request.resource.data.diff(resource.data).changedKeys()
+               .hasOnly(['camionId', 'metodoEntrega']);
       }
 
       // Operario
@@ -192,7 +241,12 @@ service cloud.firestore {
         return isOperario()
           && resource.data.operarioId == request.auth.uid
           && onlyOperationalFieldsChanged()
-          && (nuevoEstado() == "EN_PREPARACION" || nuevoEstado() == "PREPARADO");
+          && (
+            nuevoEstado() == "EN_PREPARACION" ||
+            nuevoEstado() == "PREPARADO"      ||
+            // R8: operario puede reportar un error (encargado lo confirma antes de escalar a ventas)
+            (nuevoEstado() == "CON_ERROR" && resource.data.deposito == "R8")
+          );
       }
 
       // Ventas
@@ -202,14 +256,51 @@ service cloud.firestore {
           && nuevoEstado() == "DESPACHADO";
       }
 
+      // Ventas — guardar RUT del cliente
+      function canVentasUpdateRUT() {
+        return isVentas()
+          && request.resource.data.diff(resource.data).changedKeys()
+               .hasOnly(['clienteRUT']);
+      }
+
+      // Admin — override completo de estado (incluye audit trail adminOverride)
+      function canAdminOverride() {
+        return isAdmin()
+          && request.resource.data.diff(resource.data).changedKeys()
+               .hasOnly(['estado', 'operarioId', 'operarioNombre', 'updatedAt', 'timestamps',
+                         'errorDetalle', 'errorProductoCod', 'errorProductoNombre', 'errorProductos',
+                         'adminOverride', 'camionId', 'metodoEntrega', 'clienteRUT',
+                         'cancelMotivo', 'canceladoPor', 'canceladoAt']);
+      }
+
+      // Ventas puede cancelar pedidos que NO estén despachados
+      function canVentasCancel() {
+        return isVentas()
+          && request.resource.data.estado == "CANCELADO"
+          && resource.data.estado != "DESPACHADO"
+          && request.resource.data.diff(resource.data).changedKeys()
+               .hasOnly(['estado', 'cancelMotivo', 'canceladoPor', 'canceladoAt', 'updatedAt', 'timestamps']);
+      }
+
       // **ÚNICO bloque operativo permitido**
       allow update: if isAuthed() && (
-        canEncargadoUpdate() ||
-        canOperarioUpdate() ||
-        canVentasUpdate()
+        canEncargadoUpdate()       ||
+        canEncargadoCamionUpdate() ||
+        canOperarioUpdate()        ||
+        canVentasUpdate()          ||
+        canVentasUpdateRUT()       ||
+        canVentasCancel()          ||
+        canAdminOverride()
       );
 
-      allow delete: if false;
+      // Ventas borra pedidos del flujo normal.
+      // Encargado puede borrar pedidos DESPACHADOS de su depósito (fallback de migración:
+      // cuando el pedido quedó en colección `pedidos` con estado=DESPACHADO en vez de
+      // moverse a pedidos_despachados como corresponde).
+      allow delete: if request.auth != null && (
+        userRole() == "ventas" ||
+        (isEncargado() && resource.data.estado == "DESPACHADO" && resource.data.deposito == userDeposito())
+      );
     }
 
 

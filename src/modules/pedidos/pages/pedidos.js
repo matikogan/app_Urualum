@@ -1,16 +1,18 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { listenPedidosByDeposito } from "../services/pedidosFS";
 import { useApp } from "../../../context/AppContext";
 import { useAuth } from "../../../context/AuthContext";
 import { syncPendientesDeHoy } from "../services/syncFinnegans";
+import { FLUJO_ISABELA, FLUJO_R8, flujoToConfigMap } from "../services/estadosConfig";
 
 import SearchBar from "../components/SearchBar";
 import { norm } from "utils/text"
 import Badge from "../components/Badge";
 import useNotificationSound from "hooks/useNotificationSound"; // ajustá la ruta
 
-import { collection, onSnapshot, query, where, doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { collection, onSnapshot, query, where, doc, getDoc, setDoc, deleteDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../../firebase";
 
 
@@ -39,6 +41,18 @@ function getPedidoDate(p) {
   if (p?.timestamps?.creado?.seconds) return new Date(p.timestamps.creado.seconds * 1000);
   if (p?.updatedAt?.seconds) return new Date(p.updatedAt.seconds * 1000);
   return null;
+}
+
+function getEstadoDate(p) {
+  const estado = p?.estado || "PENDIENTE_ASIGNAR";
+  // Para el primer estado, usar la fecha de creación de Finnegans
+  if (estado === "PENDIENTE_ASIGNAR") return getPedidoDate(p);
+  // Para el resto, usar el timestamp de cuando entró al estado
+  const ts = p?.timestamps?.[estado];
+  if (ts?.seconds) return new Date(ts.seconds * 1000);
+  // fallback: updatedAt, luego fecha de creación
+  if (p?.updatedAt?.seconds) return new Date(p.updatedAt.seconds * 1000);
+  return getPedidoDate(p);
 }
 
 function startOfDay(d) {
@@ -101,7 +115,7 @@ function agruparPorEstadoYBucketFecha(pedidos) {
   const out = {};
   for (const p of pedidos) {
     const estado = p?.estado || "PENDIENTE_ASIGNAR";
-    const d = getPedidoDate(p);
+    const d = getEstadoDate(p);
     const bucket = bucketLabelByDate(d);
     if (!out[estado]) out[estado] = {};
     if (!out[estado][bucket]) out[estado][bucket] = [];
@@ -153,6 +167,7 @@ function getResponsable(p) {
 export default function PedidosPage() {
   const { depositoActual, metodoFiltro, setMetodoFiltro, toast } = useApp();
   const { user, profile, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
 
   const [pedidos, setPedidos] = useState([]);
   const [loadingPedidos, setLoadingPedidos] = useState(true);
@@ -175,13 +190,19 @@ export default function PedidosPage() {
 
   const [q, setQ] = useState("");      // query de búsqueda
   const [debouncedQ, setDebouncedQ] = useState(""); // para debounce suave
+  const [syncing, setSyncing] = useState(false);
 
   const isEncargado = (profile?.rol || "").toLowerCase() === "encargado";
   const isVentas = (profile?.rol || "").toLowerCase() === "ventas";
   const isEncargadoIsabela = isEncargado && profile?.deposito === "ISABELA";
+  const isEncargadoR8      = isEncargado && profile?.deposito === "R8";
 
-  // ISABELA: pedidos despachados pendientes de control físico
-  const [porControlar, setPorControlar] = useState([]);
+  // ISABELA + R8: pedidos despachados pendientes de entrega
+  const [porControlar, setPorControlar]         = useState([]);  // ISABELA
+  const [porControlarR8, setPorControlarR8]     = useState([]);  // R8
+  const [yaEntregadosIds, setYaEntregadosIds]   = useState(new Set()); // ISABELA
+  const [yaEntregadosIdsR8, setYaEntregadosIdsR8] = useState(new Set()); // R8
+  const [collapsedEntrega, setCollapsedEntrega] = useState(false);
 
 
   const { play: playNotif, enabled: soundOn, setEnabled: setSoundOn, unlock } =
@@ -274,6 +295,46 @@ export default function PedidosPage() {
     return () => unsub();
   }, [isEncargadoIsabela]);
 
+  /* ---------- listener: ya entregados ISABELA ---------- */
+  useEffect(() => {
+    if (!isEncargadoIsabela) return;
+    const q = query(
+      collection(db, "pedidos_entregados"),
+      where("deposito", "==", "ISABELA")
+    );
+    const unsub = onSnapshot(q, snap => {
+      setYaEntregadosIds(new Set(snap.docs.map(d => d.id)));
+    }, err => console.error("[yaEntregados ISABELA]", err));
+    return () => unsub();
+  }, [isEncargadoIsabela]);
+
+  /* ---------- listener: pedidos despachados pendientes de entrega (R8) ---------- */
+  useEffect(() => {
+    if (!isEncargadoR8) return;
+    const q = query(
+      collection(db, "pedidos_despachados"),
+      where("necesitaControl", "==", true),
+      where("deposito", "==", "R8")
+    );
+    const unsub = onSnapshot(q, snap => {
+      setPorControlarR8(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => console.error("[porControlar R8]", err));
+    return () => unsub();
+  }, [isEncargadoR8]);
+
+  /* ---------- listener: ya entregados R8 ---------- */
+  useEffect(() => {
+    if (!isEncargadoR8) return;
+    const q = query(
+      collection(db, "pedidos_entregados"),
+      where("deposito", "==", "R8")
+    );
+    const unsub = onSnapshot(q, snap => {
+      setYaEntregadosIdsR8(new Set(snap.docs.map(d => d.id)));
+    }, err => console.error("[yaEntregados R8]", err));
+    return () => unsub();
+  }, [isEncargadoR8]);
+
   // listener a Firestore (por depósito y método)
   useEffect(() => {
     if (authLoading) return;
@@ -286,7 +347,7 @@ export default function PedidosPage() {
       onChange: (snap) => {
         const list = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((p) => p.estado !== "ANULADO"); // excluir anulados de la vista operativa
+          .filter((p) => p.estado !== "ANULADO" && p.estado !== "CANCELADO"); // excluir de la vista operativa
                setPedidos(list);
               setLoadingPedidos(false);
 
@@ -382,9 +443,10 @@ export default function PedidosPage() {
   // Normalizamos: estado y fecha por pedido
   const pedidosEnriquecidos = useMemo(() => {
     return (pedidosFiltrados || []).map(p => {
-      const estado   = String(p.estado || "PENDIENTE_ASIGNAR").toUpperCase();
-      const fechaObj = parseToDate(getPedidoDate(p) || p.fecha || p.emision || p.createdAt);
-      return { ...p, estado, fechaObj, _bucket: bucketFecha(fechaObj) };
+      const estado = String(p.estado || "PENDIENTE_ASIGNAR").toUpperCase();
+      const fechaCreacion = parseToDate(getPedidoDate(p) || p.fecha || p.emision || p.createdAt); // fecha Finnegans — para display
+      const fechaEstado   = parseToDate(getEstadoDate({ ...p, estado })); // fecha del estado — para bucket
+      return { ...p, estado, fechaObj: fechaCreacion, fechaEstado, _bucket: bucketFecha(fechaEstado) };
     });
   }, [pedidosFiltrados]);
 
@@ -474,20 +536,48 @@ export default function PedidosPage() {
 
 
 
-  // agrupación por estado y buckets de fecha
-  const grupos = useMemo(() => agruparPorEstadoYBucketFecha(pedidosFiltrados), [pedidosFiltrados]);
+  // ISABELA: pendientes de entrega (porControlar + fallback desde colección pedidos)
+  const pendientesEntrega = useMemo(() => {
+    if (!isEncargadoIsabela) return [];
+    const despachados = pedidosFiltrados.filter(
+      p => p.estado === "DESPACHADO" && !yaEntregadosIds.has(p.id)
+    );
+    const ids = new Set(porControlar.map(p => p.id));
+    return [...porControlar, ...despachados.filter(p => !ids.has(p.id))];
+  }, [isEncargadoIsabela, porControlar, pedidosFiltrados, yaEntregadosIds]);
 
-  // NUEVO: inyectar despachos HOY desde pedidos_despachados
+  // R8: pendientes de entrega (porControlarR8 + fallback desde colección pedidos)
+  const pendientesEntregaR8 = useMemo(() => {
+    if (!isEncargadoR8) return [];
+    const despachados = pedidosFiltrados.filter(
+      p => p.estado === "DESPACHADO" && !yaEntregadosIdsR8.has(p.id)
+    );
+    const ids = new Set(porControlarR8.map(p => p.id));
+    return [...porControlarR8, ...despachados.filter(p => !ids.has(p.id))];
+  }, [isEncargadoR8, porControlarR8, pedidosFiltrados, yaEntregadosIdsR8]);
+
+  // ISABELA y R8: excluir DESPACHADO del listado principal (aparece en sección dedicada)
+  const pedidosFiltradosParaGrupos = useMemo(() => {
+    if (isEncargadoIsabela || isEncargadoR8) {
+      return pedidosFiltrados.filter(p => p.estado !== "DESPACHADO");
+    }
+    return pedidosFiltrados;
+  }, [isEncargadoIsabela, isEncargadoR8, pedidosFiltrados]);
+
+  // agrupación por estado y buckets de fecha
+  const grupos = useMemo(() => agruparPorEstadoYBucketFecha(pedidosFiltradosParaGrupos), [pedidosFiltradosParaGrupos]);
+
+  // Inyectar despachos HOY desde pedidos_despachados.
+  // Para encargados ISABELA y R8 NO inyectamos: aparece en sección dedicada "Pendiente de entrega"
   const gruposConDesp = useMemo(() => {
     const g = { ...grupos };
-
-    if (despsHoy.length > 0) {
+    const esEncargadoConSeccionEntrega = isEncargadoIsabela || isEncargadoR8;
+    if (!esEncargadoConSeccionEntrega && despsHoy.length > 0) {
       if (!g["DESPACHADO"]) g["DESPACHADO"] = {};
       g["DESPACHADO"]["HOY"] = despsHoy;
     }
-
     return g;
-  }, [grupos, despsHoy]);
+  }, [grupos, despsHoy, isEncargadoIsabela, isEncargadoR8]);
 
 
   // Estados ordenados y con total pre-calculado; se ocultan los que están vacíos
@@ -517,12 +607,28 @@ export default function PedidosPage() {
   // Para encargado: dividir en zonas operativas
   const zonasEncargado = useMemo(() => {
     if (!isEncargado) return null;
+
+    let accionStates, ejecucionStates;
+
+    if (isEncargadoIsabela) {
+      // ISABELA: DESPACHADO ya se muestra en sección propia
+      accionStates    = ["PENDIENTE_ASIGNAR"];
+      ejecucionStates = ["EN_PREPARACION", "CONTROLADO"];
+    } else if (isEncargadoR8) {
+      // R8: encargado actúa en: asignar operarios, revisar errores, controlar pedidos preparados
+      accionStates    = ["PENDIENTE_ASIGNAR", "CON_ERROR", "PREPARADO"];
+      ejecucionStates = ["ASIGNADO", "EN_PREPARACION"];
+    } else {
+      accionStates    = ESTADOS_ACCION;
+      ejecucionStates = ESTADOS_EJECUCION;
+    }
+
     return {
-      accion:    estadosOrdenados.filter(([e]) => ESTADOS_ACCION.includes(e)),
-      ejecucion: estadosOrdenados.filter(([e]) => ESTADOS_EJECUCION.includes(e)),
-      otros:     estadosOrdenados.filter(([e]) => !ESTADOS_ACCION.includes(e) && !ESTADOS_EJECUCION.includes(e)),
+      accion:    estadosOrdenados.filter(([e]) => accionStates.includes(e)),
+      ejecucion: estadosOrdenados.filter(([e]) => ejecucionStates.includes(e)),
+      otros:     estadosOrdenados.filter(([e]) => !accionStates.includes(e) && !ejecucionStates.includes(e)),
     };
-  }, [isEncargado, estadosOrdenados]);
+  }, [isEncargado, isEncargadoIsabela, isEncargadoR8, estadosOrdenados]);
 
   /* --------- handlers UI --------- */
   function toggleBucket(estado, bucket) {
@@ -543,6 +649,20 @@ export default function PedidosPage() {
     setStateHasNew((prev) => ({ ...prev, [estado]: false }));
   }
 
+  async function handleSync() {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await syncPendientesDeHoy();
+      toast.success("Pedidos actualizados ✓");
+    } catch (e) {
+      console.error(e);
+      toast.error("No se pudieron sincronizar los pedidos");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   function toggleEstado(estado) {
     setCollapsedStates(prev => {
       const next = new Set(prev);
@@ -558,22 +678,9 @@ export default function PedidosPage() {
 
 
   // ── Config visual por estado ─────────────────────────────────────────────
-  const ESTADO_CONFIG_ISABELA = {
-    PENDIENTE_ASIGNAR: { label: "Pendiente de preparar",            icon: "🕐", color: "#f59e0b", bg: "#fef3c7", border: "#fde68a" },
-    EN_PREPARACION:    { label: "En preparación",                   icon: "⚙️", color: "#8b5cf6", bg: "#f5f3ff", border: "#ddd6fe" },
-    CONTROLADO:        { label: "Preparado — listo para despachar", icon: "✅", color: "#16a34a", bg: "#f0fdf4", border: "#86efac" },
-    DESPACHADO:        { label: "Despachado — pendiente de control", icon: "🚚", color: "#dc2626", bg: "#fef2f2", border: "#fca5a5" },
-  };
-
-  const ESTADO_CONFIG_DEFAULT = {
-    PENDIENTE_ASIGNAR: { label: "Pendiente de asignar",    icon: "🕐", color: "#f59e0b", bg: "#fef3c7", border: "#fde68a" },
-    ASIGNADO:          { label: "Asignado",                icon: "👤", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
-    EN_PREPARACION:    { label: "En preparación",          icon: "⚙️", color: "#8b5cf6", bg: "#f5f3ff", border: "#ddd6fe" },
-    PREPARADO:         { label: "Preparado — a controlar", icon: "✅", color: "#16a34a", bg: "#f0fdf4", border: "#86efac" },
-    CONTROLADO:        { label: "Controlado — listo",      icon: "📦", color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
-    DESPACHADO:        { label: "Despachados hoy",         icon: "🚚", color: "#475569", bg: "#f8fafc", border: "#e2e8f0" },
-  };
-
+  // Config visual derivada del archivo compartido — mismos labels que el pipeline
+  const ESTADO_CONFIG_ISABELA = flujoToConfigMap(FLUJO_ISABELA);
+  const ESTADO_CONFIG_DEFAULT = flujoToConfigMap(FLUJO_R8);
   const ESTADO_CONFIG = isEncargadoIsabela ? ESTADO_CONFIG_ISABELA : ESTADO_CONFIG_DEFAULT;
 
   // ── Urgencia según fecha del pedido ──────────────────────────────────────
@@ -594,12 +701,9 @@ export default function PedidosPage() {
 
   // ── Card de pedido rediseñada ─────────────────────────────────────────────
   function renderCard(p) {
-    const urgencia = getUrgencia(p);
     const responsable = getResponsable(p);
-    const timeAgo = formatTimeAgo(p.timestamps?.[p.estado]);
-    const fechaCorta = formatFechaCorta(p);
+    const timeAgo = formatTimeAgo(getEstadoDate(p));
     const itemCount = p.productos?.length ?? 0;
-    const urgenciaColor = urgencia === "vencido" ? "#ef4444" : urgencia === "hoy" ? "#f59e0b" : null;
 
     const metodoColors = {
       AGENCIA: { bg: "#eff6ff", color: "#1d4ed8" },
@@ -609,17 +713,21 @@ export default function PedidosPage() {
     };
     const metodoStyle = metodoColors[p.metodoEntrega] || { bg: "#f8fafc", color: "#475569" };
 
+    // ISABELA: pedidos DESPACHADOS van al control de entrega, no al detalle normal
+    const cardHref = (isEncargadoIsabela && p.estado === "DESPACHADO")
+      ? `/encargado/entrega/${encodeURIComponent(p.id)}`
+      : `/pedidos/${encodeURIComponent(p.id)}`;
+
     return (
       <a
         key={p.id}
-        href={`/pedidos/${encodeURIComponent(p.id)}`}
+        href={cardHref}
         style={{
           display: "block",
           textDecoration: "none",
           background: "#fff",
           borderRadius: "12px",
           border: "1px solid #e2e8f0",
-          borderLeft: urgenciaColor ? `4px solid ${urgenciaColor}` : "1px solid #e2e8f0",
           padding: "11px 14px",
           marginBottom: "7px",
           boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
@@ -642,17 +750,7 @@ export default function PedidosPage() {
               {p.metodoEntrega}
             </span>
           )}
-          {urgencia ? (
-            <span style={{
-              marginLeft: "auto", flexShrink: 0,
-              fontSize: "0.63rem", fontWeight: 700, padding: "2px 7px",
-              borderRadius: "999px", letterSpacing: "0.04em",
-              background: urgencia === "vencido" ? "#fef2f2" : "#fefce8",
-              color: urgenciaColor,
-            }}>
-              {urgencia === "vencido" ? "⚠ Vencido" : "⏰ Vence hoy"}
-            </span>
-          ) : timeAgo ? (
+          {timeAgo ? (
             <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "#94a3b8", fontWeight: 500, flexShrink: 0 }}>
               ⏱ {timeAgo}
             </span>
@@ -673,13 +771,11 @@ export default function PedidosPage() {
           <span style={{ fontSize: "0.76rem", color: "#64748b" }}>
             {itemCount} ítem{itemCount !== 1 ? "s" : ""}
           </span>
-          {fechaCorta && (
-            <>
-              <span style={{ fontSize: "0.7rem", color: "#cbd5e1" }}>·</span>
-              <span style={{ fontSize: "0.76rem", color: urgenciaColor || "#64748b" }}>
-                📅 {fechaCorta}
-              </span>
-            </>
+          {/* Fecha de creación del pedido — siempre visible como referencia */}
+          {p.estado !== "PENDIENTE_ASIGNAR" && formatFechaCorta(p) && (
+            <span style={{ fontSize: "0.68rem", color: "#94a3b8" }}>
+              📅 {formatFechaCorta(p)}
+            </span>
           )}
           {responsable && (
             <>
@@ -690,12 +786,6 @@ export default function PedidosPage() {
               }}>
                 👤 {responsable}
               </span>
-            </>
-          )}
-          {urgencia && timeAgo && (
-            <>
-              <span style={{ fontSize: "0.7rem", color: "#cbd5e1" }}>·</span>
-              <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>⏱ {timeAgo}</span>
             </>
           )}
         </div>
@@ -766,14 +856,38 @@ export default function PedidosPage() {
             border: `1.5px solid ${cfg.border}`,
             borderTop: "none",
             borderRadius: "0 0 14px 14px",
-            padding: "10px 10px 4px",
+            padding: "6px 10px 4px",
           }}>
-            {todosLosItems.length === 0 ? (
+            {BUCKET_ORDER.filter(b => (porFecha[b] || []).length > 0).length === 0 ? (
               <p style={{ textAlign: "center", color: "#94a3b8", fontSize: "0.82rem", padding: "12px 0", margin: 0 }}>
                 Sin pedidos
               </p>
             ) : (
-              todosLosItems.map(p => renderCard(p))
+              BUCKET_ORDER.filter(b => (porFecha[b] || []).length > 0).map(bucket => (
+                <div key={bucket} style={{ marginBottom: "4px" }}>
+                  {/* Sub-header de bucket */}
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: "8px",
+                    padding: "6px 4px 4px",
+                  }}>
+                    <span style={{
+                      fontSize: "0.68rem", fontWeight: 700,
+                      color: cfg.color, textTransform: "uppercase", letterSpacing: "0.07em",
+                      opacity: 0.8,
+                    }}>
+                      {bucket}
+                    </span>
+                    <div style={{ flex: 1, height: "1px", background: cfg.border }} />
+                    <span style={{
+                      fontSize: "0.65rem", fontWeight: 600, color: cfg.color, opacity: 0.7,
+                    }}>
+                      {(porFecha[bucket] || []).length}
+                    </span>
+                  </div>
+                  {/* Cards del bucket */}
+                  {(porFecha[bucket] || []).map(p => renderCard(p))}
+                </div>
+              ))
             )}
           </div>
         )}
@@ -784,12 +898,34 @@ export default function PedidosPage() {
   // ── Control físico ISABELA ────────────────────────────────────────────────
   async function marcarControlado(pedidoId) {
     try {
-      await updateDoc(doc(db, "pedidos_despachados", pedidoId), {
-        necesitaControl: false,
-        controlFisicoAt: serverTimestamp(),
-        controladoPor: user?.uid || null,
+      // Buscar el pedido: primero en pedidos_despachados, luego en pedidos (flujo legacy)
+      const despRef = doc(db, "pedidos_despachados", pedidoId);
+      const despSnap = await getDoc(despRef);
+      let data, sourceRef;
+
+      if (despSnap.exists()) {
+        data = despSnap.data();
+        sourceRef = despRef;
+      } else {
+        const pedRef = doc(db, "pedidos", pedidoId);
+        const pedSnap = await getDoc(pedRef);
+        if (!pedSnap.exists()) { toast.error("Pedido no encontrado"); return; }
+        data = pedSnap.data();
+        sourceRef = pedRef;
+      }
+
+      // Escribir en la colección permanente de entregados
+      await setDoc(doc(db, "pedidos_entregados", pedidoId), {
+        ...data,
+        entregadoAt: serverTimestamp(),
+        entregadoPor: user?.uid || null,
+        source: "app-entrega",
       });
-      toast.success("Control registrado ✓");
+
+      // Borrar de la colección de origen
+      await deleteDoc(sourceRef);
+
+      toast.success("Pedido entregado ✓");
     } catch (e) {
       console.error(e);
       toast.error("No se pudo registrar el control");
@@ -832,6 +968,25 @@ export default function PedidosPage() {
           </span>
           {(isEncargado || isVentas) && (
             <div style={{ display: "flex", gap: "6px" }}>
+              {isEncargado && (
+                <button
+                  type="button"
+                  onClick={handleSync}
+                  disabled={syncing}
+                  title="Actualizar pedidos desde Finnegans"
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: "34px", height: "34px",
+                    background: syncing ? "#eff6ff" : "#f8fafc",
+                    border: `1px solid ${syncing ? "#93c5fd" : "#e2e8f0"}`,
+                    borderRadius: "10px", fontSize: "1rem",
+                    cursor: syncing ? "not-allowed" : "pointer",
+                    opacity: syncing ? 0.7 : 1,
+                  }}
+                >
+                  {syncing ? "⏳" : "🔄"}
+                </button>
+              )}
               {isEncargado && (
                 <a
                   href="/encargado/errores"
@@ -920,32 +1075,174 @@ export default function PedidosPage() {
       {/* ── Contenido ── */}
       <div style={{ padding: "10px 10px 80px" }}>
 
-        {/* ── ISABELA: pendientes de control físico ── */}
-        {isEncargadoIsabela && porControlar.length > 0 && (
-          <div style={{ marginBottom: "16px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-              <span style={{ fontSize: "0.67rem", fontWeight: 700, color: "#dc2626", letterSpacing: "0.07em", textTransform: "uppercase" }}>
-                🔴 Pendiente de control
+        {/* ── ISABELA: pendientes de entrega (colapsable) ── */}
+        {isEncargadoIsabela && pendientesEntrega.length > 0 && (
+          <div style={{ marginBottom: "10px" }}>
+            {/* Header colapsable */}
+            <button
+              type="button"
+              onClick={() => setCollapsedEntrega(c => !c)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: "10px",
+                padding: "13px 16px",
+                background: collapsedEntrega ? "#fff" : "#fef2f2",
+                border: `1.5px solid ${collapsedEntrega ? "#e2e8f0" : "#fca5a5"}`,
+                borderRadius: collapsedEntrega ? "14px" : "14px 14px 0 0",
+                cursor: "pointer", textAlign: "left",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span style={{ fontSize: "1rem", lineHeight: 1, flexShrink: 0 }}>
+                {ESTADO_CONFIG_ISABELA.DESP_PENDIENTE?.icon || "🚚"}
               </span>
-              <span style={{ background: "#dc2626", color: "#fff", fontSize: "0.65rem", fontWeight: 700, padding: "2px 8px", borderRadius: "999px" }}>
-                {porControlar.length}
+              <span style={{ flex: 1, fontWeight: 700, fontSize: "0.88rem", color: "#dc2626" }}>
+                {ESTADO_CONFIG_ISABELA.DESP_PENDIENTE?.label || "Despachado · entregar"}
               </span>
-            </div>
-            {porControlar.map(p => (
-              <div key={p.id} style={{ background: "#fff", border: "1.5px solid #fca5a5", borderLeft: "4px solid #dc2626", borderRadius: "12px", padding: "12px 14px", marginBottom: "8px", display: "flex", alignItems: "center", gap: "12px" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>#{p.numero || p.id}</p>
-                  <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.cliente || "—"}</p>
-                  {p.metodoEntrega && <span style={{ fontSize: "0.7rem", color: "#64748b" }}>🚚 {p.metodoEntrega}</span>}
-                </div>
-                <button
-                  onClick={() => marcarControlado(p.id)}
-                  style={{ flexShrink: 0, padding: "9px 14px", background: "#16a34a", border: "none", borderRadius: "10px", color: "#fff", fontWeight: 700, fontSize: "0.82rem", cursor: "pointer" }}
-                >
-                  ✅ Controlado
-                </button>
+              <span style={{
+                flexShrink: 0,
+                background: "#dc262622",
+                color: "#dc2626",
+                fontSize: "0.78rem", fontWeight: 700,
+                padding: "2px 9px", borderRadius: "999px",
+              }}>
+                {pendientesEntrega.length}
+              </span>
+              <span style={{ fontSize: "0.75rem", color: "#dc2626", flexShrink: 0, marginLeft: "2px" }}>
+                {collapsedEntrega ? "▶" : "▼"}
+              </span>
+            </button>
+
+            {/* Lista de pedidos (colapsable) */}
+            {!collapsedEntrega && (
+              <div style={{
+                border: "1.5px solid #fca5a5", borderTop: "none",
+                borderRadius: "0 0 14px 14px",
+                background: "#fef2f2",
+                padding: "8px 10px 10px",
+              }}>
+                {pendientesEntrega.map(p => {
+                  const despachadoAgo = formatTimeAgo(
+                    p.despachadoAt || p.timestamps?.DESPACHADO || p.updatedAt
+                  );
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => navigate(`/encargado/entrega/${p.id}`)}
+                      style={{
+                        background: "#fff", border: "1.5px solid #fecaca",
+                        borderLeft: "4px solid #dc2626",
+                        borderRadius: "10px", padding: "11px 14px", marginBottom: "6px",
+                        display: "flex", alignItems: "center", gap: "12px", cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "2px" }}>
+                          <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>
+                            #{p.numero || p.id}
+                          </p>
+                          {despachadoAgo && (
+                            <span style={{ fontSize: "0.7rem", color: "#94a3b8", fontWeight: 500 }}>
+                              ⏱ {despachadoAgo}
+                            </span>
+                          )}
+                        </div>
+                        <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {p.cliente || "—"}
+                        </p>
+                        {p.metodoEntrega && (
+                          <span style={{ fontSize: "0.7rem", color: "#64748b" }}>🚚 {p.metodoEntrega}</span>
+                        )}
+                      </div>
+                      <span style={{ flexShrink: 0, color: "#dc2626", fontSize: "0.8rem", fontWeight: 700 }}>
+                        Controlar →
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            )}
+          </div>
+        )}
+
+        {/* ── R8: pendientes de entrega (colapsable) ── */}
+        {isEncargadoR8 && pendientesEntregaR8.length > 0 && (
+          <div style={{ marginBottom: "10px" }}>
+            <button
+              type="button"
+              onClick={() => setCollapsedEntrega(c => !c)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", gap: "10px",
+                padding: "13px 16px",
+                background: collapsedEntrega ? "#fff" : "#fff7ed",
+                border: `1.5px solid ${collapsedEntrega ? "#e2e8f0" : "#fdba74"}`,
+                borderRadius: collapsedEntrega ? "14px" : "14px 14px 0 0",
+                cursor: "pointer", textAlign: "left",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span style={{ fontSize: "1rem", lineHeight: 1, flexShrink: 0 }}>🚚</span>
+              <span style={{ flex: 1, fontWeight: 700, fontSize: "0.88rem", color: "#b45309" }}>
+                Despachado · entregar
+              </span>
+              <span style={{
+                flexShrink: 0, background: "#b4530922", color: "#b45309",
+                fontSize: "0.78rem", fontWeight: 700, padding: "2px 9px", borderRadius: "999px",
+              }}>
+                {pendientesEntregaR8.length}
+              </span>
+              <span style={{ fontSize: "0.75rem", color: "#b45309", flexShrink: 0, marginLeft: "2px" }}>
+                {collapsedEntrega ? "▶" : "▼"}
+              </span>
+            </button>
+
+            {!collapsedEntrega && (
+              <div style={{
+                border: "1.5px solid #fdba74", borderTop: "none",
+                borderRadius: "0 0 14px 14px",
+                background: "#fff7ed",
+                padding: "8px 10px 10px",
+              }}>
+                {pendientesEntregaR8.map(p => {
+                  const despachadoAgo = formatTimeAgo(
+                    p.despachadoAt || p.timestamps?.DESPACHADO || p.updatedAt
+                  );
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => navigate(`/encargado/entrega/${p.id}`)}
+                      style={{
+                        background: "#fff", border: "1.5px solid #fed7aa",
+                        borderLeft: "4px solid #b45309",
+                        borderRadius: "10px", padding: "11px 14px", marginBottom: "6px",
+                        display: "flex", alignItems: "center", gap: "12px", cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "2px" }}>
+                          <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>
+                            #{p.numero || p.id}
+                          </p>
+                          {despachadoAgo && (
+                            <span style={{ fontSize: "0.7rem", color: "#94a3b8", fontWeight: 500 }}>
+                              ⏱ {despachadoAgo}
+                            </span>
+                          )}
+                        </div>
+                        <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {p.cliente || "—"}
+                        </p>
+                        {p.metodoEntrega && (
+                          <span style={{ fontSize: "0.7rem", color: "#64748b" }}>🚚 {p.metodoEntrega}</span>
+                        )}
+                      </div>
+                      <span style={{ flexShrink: 0, color: "#b45309", fontSize: "0.8rem", fontWeight: 700 }}>
+                        Entregar →
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

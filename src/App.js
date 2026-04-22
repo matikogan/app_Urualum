@@ -21,6 +21,9 @@ import PedidoDetalle from "modules/pedidos/pages/pedidoDetalle";
 import ConfirmarDespacho from "modules/pedidos/pages/confirmarDespacho";
 import Despacho from "modules/pedidos/pages/despacho";
 import ControlCarga from "modules/pedidos/pages/ControlCarga";
+import GestionCamiones from "modules/pedidos/pages/GestionCamiones";
+import ControlCamion from "modules/pedidos/pages/ControlCamion";
+import EntregaIsabela from "modules/pedidos/pages/EntregaIsabela";
 
 // Pedidos (Operario)
 import PedidosAsignadosOperario from "modules/pedidos/components/PedidosAsignadosOperario";
@@ -30,6 +33,7 @@ import PedidoDetalleOperario from "modules/pedidos/components/PedidoDetalleOpera
 import PedidosControladosVentas from "./modules/pedidos/pages/PedidosControladosVentas";
 import PedidoDetalleVentas from "./modules/pedidos/pages/PedidoDetalleVentas";
 import DespachadosHistorico from "./modules/pedidos/pages/DespachadosHistorico";
+import PipelineVentas from "./modules/pedidos/pages/PipelineVentas";
 
 // Errores (Encargado)
 import ErroresPreparacionPage from "modules/pedidos/pages/ErroresPreparacionPago";
@@ -38,6 +42,8 @@ import ErroresPreparacionPage from "modules/pedidos/pages/ErroresPreparacionPago
 import TestFinnegans from "modules/pedidos/pages/testFinnegans";
 import TestFSPage from "./pages/testFS";
 import TestSyncPage from "./pages/testSync";
+import AdminResetDeposito from "./pages/AdminResetDeposito";
+import AdminPanel from "./pages/AdminPanel";
 
 // Global
 import EscanearQR from "pages/escanearQR";
@@ -87,9 +93,9 @@ function PedidosLanding() {
 
   const role = String(profile.role || profile.rol || "").toLowerCase();
   if (role === "operario") return <PedidosAsignadosOperario />;
-  if (role === "ventas") return <PedidosControladosVentas />;
+  if (role === "ventas" || role === "admin") return <PipelineVentas />;
 
-  return <Pedidos />; // default para encargados / admin / otros
+  return <Pedidos />; // default para encargados / otros
 }
 
 function ConfirmarDespachoWrapper() {
@@ -158,12 +164,13 @@ export default function App() {
             <Route path="/operario/asignados" element={<PedidosAsignadosOperario />} />
             <Route path="/pedidos-operario/:id" element={<PedidoDetalleOperario />} />
             
-            <Route element={<ProtectedRoute roles={["ventas"]} />}>
+            <Route element={<ProtectedRoute roles={["ventas", "admin"]} />}>
               <Route path="/ventas/para-despachar" element={<PedidosControladosVentas />} />
               <Route path="/ventas/para-despachar/:id" element={<PedidoDetalleVentas />} />
               <Route path="/ventas/pedidos-web" element={<PedidosWeb />} />
               <Route path="/ventas/despachar/:id" element={<ConfirmarDespachoWrapper />} />
               <Route path="/ventas/despachados" element={<DespachadosHistorico />} />
+              <Route path="/ventas/pipeline" element={<PipelineVentas />} />
             </Route>
 
             <Route path="/despacho/:id" element={<Despacho />} />
@@ -171,6 +178,9 @@ export default function App() {
             {/* Errores */}
             <Route path="/encargado/errores" element={<ErroresPreparacionPage />} />
             <Route path="/encargado/control-carga" element={<ControlCarga />} />
+            <Route path="/encargado/camiones" element={<GestionCamiones />} />
+            <Route path="/encargado/camiones/:camionId" element={<ControlCamion />} />
+            <Route path="/encargado/entrega/:id" element={<EntregaIsabela />} />
             <Route path="/errores/nuevo" element={<ErrorCarga />} />
             <Route path="/actitud/nuevo" element={<ActitudCarga />} />
             <Route path="/reporte/semanal" element={<ReporteSemanal />} />
@@ -180,6 +190,12 @@ export default function App() {
               <Route path="/test-fs" element={<TestFSPage />} />
               <Route path="/test-sync" element={<TestSyncPage />} />
             </Route>
+
+            {/* Panel de administración */}
+            <Route path="/admin/panel" element={<AdminPanel />} />
+
+            {/* Utilidades de desarrollo — cualquier usuario autenticado */}
+            <Route path="/admin/reset-deposito" element={<AdminResetDeposito />} />
 
             {/* Test Finnegans — temporalmente sin restricción para inspección */}
             <Route path="/test-finnegans" element={<TestFinnegans />} />
