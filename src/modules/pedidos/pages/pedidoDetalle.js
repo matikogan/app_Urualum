@@ -6,7 +6,7 @@ import { getPedido, asignarOperario, updateEstado, cancelarPedido } from "../ser
 import { ESTADOS } from "../services/estados";
 import { getFlag } from "../services/featureFlags";
 import { db } from "../../../firebase";
-import { doc, updateDoc, collection, getDocs, query, where, addDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, serverTimestamp } from "firebase/firestore";
 import { getCatalogoByCodUru } from "../services/catalogo";
 import VolverListaPedidos from "../components/VolverListaPedidos";
 
@@ -764,13 +764,22 @@ export default function PedidoDetalle() {
     return () => { alive = false; };
   }, []);
 
-  // cargar pedido
+  // cargar pedido — intenta pedidos primero, luego pedidos_despachados y pedidos_entregados
   useEffect(() => {
     let cancelled = false;
     if (!id) { setError("ID inválido"); return; }
     (async () => {
       try {
-        const p = await getPedido(id);
+        let p = await getPedido(id);
+        if (!p) {
+          // Fallback: buscar en colecciones secundarias (despachados / entregados)
+          const [despSnap, entSnap] = await Promise.all([
+            getDoc(doc(db, "pedidos_despachados", id)),
+            getDoc(doc(db, "pedidos_entregados", id)),
+          ]);
+          if (entSnap.exists())  p = { id: entSnap.id,  ...entSnap.data(),  _source: "entregados"  };
+          else if (despSnap.exists()) p = { id: despSnap.id, ...despSnap.data(), _source: "despachados" };
+        }
         if (cancelled) return;
         if (!p) { setError("Pedido no encontrado"); setPedido(null); }
         else { setError(null); setPedido(p); }
@@ -1540,7 +1549,148 @@ const filteredOperarios = useMemo(() => {
       </div>
     );
   }
-  // ── Fin vista ASIGNADO ───────────────────────────────────────────────────
+  // ── Fin vista ASIGNADO encargado ─────────────────────────────────────────
+
+  // ── Vista ASIGNADO — OPERARIO (mobile-first) ──────────────────────────────
+  if (pedido.estado === ESTADOS.ASIGNADO && (!isEncargado || isSelfAssigned)) {
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+
+    async function onComenzarPreparacion() {
+      try {
+        setSaving(true);
+        await updateEstado(id, ESTADOS.EN_PREPARACION);
+        setPedido(prev => prev ? { ...prev, estado: ESTADOS.EN_PREPARACION } : prev);
+        toast.success("Preparación iniciada");
+      } catch (e) {
+        console.error(e);
+        toast.error(e?.message || "No se pudo iniciar la preparación");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "88px" }}>
+
+        {/* ── Header ── */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+          <VolverListaPedidos to="/pedidos" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                Pedido #{pedido.numero || id}
+              </p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
+                {pedido.cliente || "—"}
+              </h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#dbeafe", color: "#1e40af", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>
+              ASIGNADO
+            </span>
+          </div>
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                📅 {formatFecha(pedido.finFecha)}
+              </span>
+            )}
+            {pedido.metodoEntrega && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🚚 {pedido.metodoEntrega}
+              </span>
+            )}
+            {pedido.deposito && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🏭 {pedido.deposito}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ padding: "16px" }}>
+
+          {/* ── Tu tarea ── */}
+          <div style={{ background: "#eff6ff", border: "1.5px solid #bfdbfe", borderRadius: "14px", padding: "16px 18px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "14px" }}>
+            <div style={{ flexShrink: 0, width: "44px", height: "44px", borderRadius: "50%", background: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.3rem" }}>
+              📋
+            </div>
+            <div>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "#1e40af" }}>
+                Este pedido está asignado a vos
+              </p>
+              <p style={{ margin: "3px 0 0", fontSize: "0.8rem", color: "#3b82f6" }}>
+                {productos.length} producto{productos.length !== 1 ? "s" : ""} para preparar
+              </p>
+            </div>
+          </div>
+
+          {/* ── Productos ── */}
+          <p style={{ margin: "0 0 10px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+            Contenido del pedido · {productos.length} producto{productos.length !== 1 ? "s" : ""}
+          </p>
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden", marginBottom: "12px" }}>
+            {productos.length === 0 ? (
+              <p style={{ margin: 0, padding: "16px", color: "#94a3b8", fontSize: "0.85rem" }}>Sin productos registrados.</p>
+            ) : (
+              productos.map((it, i) => {
+                const raw = it.cod || it.descripcion || it.desc || "";
+                const uru = toURUCode(raw);
+                const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                const color  = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
+                const qty    = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 16px", borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 500, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                      {color && <p style={{ margin: "1px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
+                    </div>
+                    <span style={{ flexShrink: 0, background: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: "0.82rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* ── CTA fijo ── */}
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "14px 16px 24px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 20px rgba(0,0,0,0.08)" }}>
+          <button
+            type="button"
+            onClick={onComenzarPreparacion}
+            disabled={saving}
+            style={{
+              width: "100%", padding: "16px",
+              borderRadius: "14px", border: "none",
+              fontWeight: 800, fontSize: "1.05rem",
+              background: saving ? "#e2e8f0" : "#f59e0b",
+              color: saving ? "#94a3b8" : "#fff",
+              cursor: saving ? "not-allowed" : "pointer",
+              boxShadow: saving ? "none" : "0 4px 16px rgba(245,158,11,0.35)",
+              transition: "all 0.15s ease",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+            }}
+          >
+            {saving ? (
+              <>
+                <span style={{ width: "16px", height: "16px", borderRadius: "50%", border: "2px solid #94a3b8", borderTopColor: "transparent", display: "inline-block" }} />
+                Iniciando…
+              </>
+            ) : (
+              "🟡 Comenzar preparación"
+            )}
+          </button>
+        </div>
+      </div>
+    );
+  }
+  // ── Fin vista ASIGNADO operario ───────────────────────────────────────────
 
   // ── Vista especial EN_PREPARACION para encargado ─────────────────────────
   // (Omitir si es autoasignado: cae al main return con EncPreparacionPanel)
@@ -1810,7 +1960,84 @@ const filteredOperarios = useMemo(() => {
       </div>
     );
   }
-  // ── Fin vista EN_PREPARACION ──────────────────────────────────────────────
+  // ── Fin vista EN_PREPARACION encargado ───────────────────────────────────
+
+  // ── Vista EN_PREPARACION — OPERARIO (mobile-first, usa EncPreparacionPanel) ──
+  if (pedido.estado === ESTADOS.EN_PREPARACION && (!isEncargado || isSelfAssigned)) {
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh" }}>
+
+        {/* ── Header ── */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px", position: "sticky", top: 0, zIndex: 20 }}>
+          <VolverListaPedidos to="/pedidos" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                Pedido #{pedido.numero || id}
+              </p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.25rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
+                {pedido.cliente || "—"}
+              </h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#fef9c3", color: "#854d0e", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>
+              EN PREPARACIÓN
+            </span>
+          </div>
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                📅 {formatFecha(pedido.finFecha)}
+              </span>
+            )}
+            {pedido.metodoEntrega && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🚚 {pedido.metodoEntrega}
+              </span>
+            )}
+            {pedido.deposito && (
+              <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>
+                🏭 {pedido.deposito}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* ── Panel interactivo de preparación ── */}
+        <EncPreparacionPanel
+          pedido={pedido}
+          productos={productos}
+          catalogIndex={catalogoMap}
+          btnFinalizarLabel={isIsabela ? "Pedido completado" : undefined}
+          onReportarError={async ({ productos: prodsError }) => { await submitErrorPreparacion(prodsError); }}
+          onPreparacionFinalizada={async () => {
+            try {
+              const nextEstado = isIsabela ? ESTADOS.CONTROLADO : ESTADOS.PREPARADO;
+              await updateEstado(id, nextEstado);
+              if (isIsabela) {
+                toast.success("Pedido listo para despachar ✓");
+                navigate("/pedidos");
+              } else {
+                setPedido(prev => prev ? { ...prev, estado: nextEstado } : prev);
+                toast.success("Pedido preparado ✓");
+              }
+            } catch (e) {
+              toast.error(e?.message || "No se pudo finalizar la preparación");
+            }
+          }}
+        />
+      </div>
+    );
+  }
+  // ── Fin vista EN_PREPARACION operario ─────────────────────────────────────
 
   // ── Vista especial PREPARADO para encargado ──────────────────────────────
   if (pedido.estado === ESTADOS.PREPARADO && isEncargado) {
@@ -3007,6 +3234,382 @@ const filteredOperarios = useMemo(() => {
     );
   }
   // ── Fin vista CONTROLADO ventas ───────────────────────────────────────────
+
+  // ── Vista ENTREGADO — encargado (mobile/tablet) y ventas (desktop) ─────────
+  if (pedido.estado === "ENTREGADO" || pedido._source === "entregados") {
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+
+    const formatFechaHora = (ts) => {
+      if (!ts) return "—";
+      const d = ts?.toDate ? ts.toDate() : new Date(ts);
+      if (isNaN(d)) return "—";
+      return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    };
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+
+    const estadosTimeline = pedido.deposito === "ISABELA"
+      ? ["PENDIENTE_ASIGNAR", "EN_PREPARACION", "CONTROLADO", "DESPACHADO", "ENTREGADO"]
+      : ["PENDIENTE_ASIGNAR", "ASIGNADO", "EN_PREPARACION", "PREPARADO", "CONTROLADO", "DESPACHADO", "ENTREGADO"];
+    const labelMap = {
+      PENDIENTE_ASIGNAR: "Ingresó", ASIGNADO: "Asignado",
+      EN_PREPARACION: "Preparando", PREPARADO: "Preparado",
+      CONTROLADO: "Controlado", DESPACHADO: "Despachado", ENTREGADO: "Entregado",
+    };
+
+    if (isVentas) {
+      // ── Desktop-first para ventas ──────────────────────────────────────────
+      const operarioNombre = pedido.operarioNombre || "—";
+      return (
+        <div style={{ background: "#f1f5f9", minHeight: "100vh" }}>
+          {/* Header sticky */}
+          <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 24px", position: "sticky", top: 0, zIndex: 10 }}>
+            <div style={{ maxWidth: "1200px", margin: "0 auto", display: "flex", alignItems: "center", gap: "14px" }}>
+              <button type="button" onClick={() => navigate("/ventas/pipeline")}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "34px", height: "34px", flexShrink: 0, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem" }}>
+                ←
+              </button>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Pedido #{pedido.numero || id}</p>
+                <h1 style={{ margin: "1px 0 0", fontSize: "1.1rem", fontWeight: 800, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pedido.cliente || "—"}</h1>
+              </div>
+              <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+                {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🚚 {pedido.metodoEntrega}</span>}
+                {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🏭 {pedido.deposito}</span>}
+                <span style={{ background: "#dcfce7", color: "#166534", fontSize: "0.68rem", fontWeight: 700, padding: "3px 10px", borderRadius: "999px", letterSpacing: "0.05em" }}>✅ ENTREGADO</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "24px", display: "grid", gridTemplateColumns: "1fr 300px", gap: "24px", alignItems: "start" }}>
+            {/* Columna principal */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {/* Timeline */}
+              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 20px" }}>
+                <p style={{ margin: "0 0 14px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Recorrido del pedido</p>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  {estadosTimeline.map((key, i) => {
+                    const ts = key === "ENTREGADO"
+                      ? (pedido.entregadoAt || pedido.timestamps?.[key])
+                      : pedido.timestamps?.[key];
+                    const at = ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
+                    const done = !!at && !isNaN(at);
+                    const isCurrent = key === "ENTREGADO";
+                    return (
+                      <div key={key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
+                        {i > 0 && <div style={{ position: "absolute", top: "11px", right: "50%", left: "-50%", height: "2px", background: done ? "#16a34a" : "#e2e8f0", zIndex: 0 }} />}
+                        <div style={{ width: "22px", height: "22px", borderRadius: "50%", background: isCurrent ? "#16a34a" : done ? "#86efac" : "#e2e8f0", border: `2.5px solid ${isCurrent ? "#16a34a" : done ? "#86efac" : "#e2e8f0"}`, zIndex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {done && <span style={{ fontSize: "0.58rem", color: isCurrent ? "#fff" : "#166534" }}>✓</span>}
+                        </div>
+                        <p style={{ margin: "5px 0 0", fontSize: "0.66rem", fontWeight: isCurrent ? 800 : 500, color: isCurrent ? "#166534" : done ? "#16a34a" : "#94a3b8", textAlign: "center", lineHeight: 1.2 }}>{labelMap[key]}</p>
+                        {at && !isNaN(at) && <p style={{ margin: "2px 0 0", fontSize: "0.6rem", color: "#b8b8cc", textAlign: "center" }}>{at.toLocaleDateString("es-AR", { day: "2-digit", month: "short" })}</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Productos */}
+              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden" }}>
+                <div style={{ padding: "12px 16px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Productos · {productos.length}</span>
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.88rem" }}>
+                  <tbody>
+                    {productos.map((it, i) => {
+                      const raw = it.cod || it.descripcion || it.desc || "";
+                      const uru = toURUCode(raw);
+                      const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                      const color  = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
+                      const qty    = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                      return (
+                        <tr key={i} style={{ borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                          <td style={{ padding: "10px 16px", verticalAlign: "middle" }}>
+                            <p style={{ margin: 0, fontWeight: 600, color: "#1e293b" }}>{nombre}</p>
+                            {color && <p style={{ margin: "2px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
+                          </td>
+                          <td style={{ padding: "10px 16px", textAlign: "right", verticalAlign: "middle" }}>
+                            <span style={{ background: "#dcfce7", color: "#166534", fontWeight: 700, fontSize: "0.85rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Aside */}
+            <div style={{ position: "sticky", top: "76px", display: "flex", flexDirection: "column", gap: "14px" }}>
+              {/* Confirmación de entrega */}
+              <div style={{ background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: "14px", padding: "16px 18px" }}>
+                <p style={{ margin: "0 0 10px", fontSize: "0.68rem", fontWeight: 700, color: "#166534", textTransform: "uppercase", letterSpacing: "0.07em" }}>✅ Entregado</p>
+                <p style={{ margin: "0 0 4px", fontSize: "0.85rem", color: "#064e3b" }}><strong>Fecha:</strong> {formatFechaHora(pedido.entregadoAt)}</p>
+                {pedido.agencia && <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "#064e3b" }}><strong>Agencia:</strong> {pedido.agencia}</p>}
+              </div>
+              {/* Resumen */}
+              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 18px" }}>
+                <p style={{ margin: "0 0 10px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Resumen</p>
+                {[
+                  { label: "Pedido", value: `#${pedido.numero || id}` },
+                  { label: "Cliente", value: pedido.cliente || "—" },
+                  { label: "Método", value: pedido.metodoEntrega || "—" },
+                  { label: "Depósito", value: pedido.deposito || "—" },
+                  { label: "Operario", value: operarioNombre },
+                  { label: "Bultos", value: pedido.bultos ?? "—" },
+                  { label: "Fecha pedido", value: formatFecha(pedido.finFecha) },
+                ].map(({ label, value }) => (
+                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: "1px solid #f1f5f9", gap: "8px" }}>
+                    <span style={{ fontSize: "0.78rem", color: "#94a3b8", fontWeight: 500, flexShrink: 0 }}>{label}</span>
+                    <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#0f172a", textAlign: "right" }}>{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Mobile/tablet para encargado ─────────────────────────────────────────
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "24px" }}>
+        {/* Header */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+          <VolverListaPedidos to="/pedidos" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Pedido #{pedido.numero || id}</p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>{pedido.cliente || "—"}</h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#dcfce7", color: "#166534", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>✅ ENTREGADO</span>
+          </div>
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
+            {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🚚 {pedido.metodoEntrega}</span>}
+            {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🏭 {pedido.deposito}</span>}
+          </div>
+        </div>
+
+        <div style={{ padding: "16px", maxWidth: "640px", margin: "0 auto" }}>
+
+          {/* Banner entregado */}
+          <div style={{ background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: "14px", padding: "16px 18px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "14px" }}>
+            <span style={{ fontSize: "1.6rem", flexShrink: 0 }}>✅</span>
+            <div>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "#166534" }}>Pedido entregado</p>
+              <p style={{ margin: "3px 0 0", fontSize: "0.8rem", color: "#16a34a" }}>{formatFechaHora(pedido.entregadoAt)}</p>
+              {pedido.agencia && <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "#16a34a" }}>📦 Agencia: {pedido.agencia}</p>}
+            </div>
+          </div>
+
+          {/* Preparado por */}
+          {pedido.operarioNombre && (
+            <>
+              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Preparado por</p>
+              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ width: "38px", height: "38px", borderRadius: "50%", background: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.95rem", fontWeight: 700, color: "#fff", flexShrink: 0 }}>
+                  {pedido.operarioNombre[0]?.toUpperCase() || "?"}
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "#0f172a" }}>{pedido.operarioNombre}</p>
+                  {(pedido.bultos > 0 || pedido.paquetes > 0) && (
+                    <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "#64748b" }}>
+                      {pedido.bultos > 0 ? `📦 ${pedido.bultos} bultos` : ""}
+                      {pedido.bultos > 0 && pedido.paquetes > 0 ? " · " : ""}
+                      {pedido.paquetes > 0 ? `📫 ${pedido.paquetes} paquetes` : ""}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Productos */}
+          <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+            Contenido · {productos.length} producto{productos.length !== 1 ? "s" : ""}
+          </p>
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden" }}>
+            {productos.length === 0 ? (
+              <p style={{ margin: 0, padding: "16px", color: "#94a3b8", fontSize: "0.85rem" }}>Sin productos registrados.</p>
+            ) : (
+              productos.map((it, i) => {
+                const raw = it.cod || it.descripcion || it.desc || "";
+                const uru = toURUCode(raw);
+                const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                const color  = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
+                const qty    = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 16px", borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ margin: 0, fontSize: "0.88rem", fontWeight: 500, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                      {color && <p style={{ margin: "1px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
+                    </div>
+                    <span style={{ flexShrink: 0, background: "#dcfce7", color: "#166534", fontWeight: 700, fontSize: "0.82rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // ── Fin vista ENTREGADO ───────────────────────────────────────────────────
+
+  // ── Vista ANULADO ─────────────────────────────────────────────────────────
+  if (pedido.estado === "ANULADO") {
+    const formatFechaHora = (ts) => {
+      if (!ts) return "—";
+      const d = ts?.toDate ? ts.toDate() : new Date(ts);
+      if (isNaN(d)) return "—";
+      return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    };
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "24px" }}>
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+          <VolverListaPedidos to="/pedidos" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Pedido #{pedido.numero || id}</p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>{pedido.cliente || "—"}</h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#fef2f2", color: "#dc2626", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>🚫 ANULADO</span>
+          </div>
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
+            {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🚚 {pedido.metodoEntrega}</span>}
+            {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🏭 {pedido.deposito}</span>}
+          </div>
+        </div>
+
+        <div style={{ padding: "16px", maxWidth: "640px", margin: "0 auto" }}>
+          <div style={{ background: "#fef2f2", border: "1.5px solid #fca5a5", borderRadius: "14px", padding: "16px 18px", marginBottom: "14px" }}>
+            <p style={{ margin: "0 0 8px", fontSize: "0.68rem", fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.07em" }}>🚫 Pedido anulado</p>
+            {pedido.anuladoAt && (
+              <p style={{ margin: "0 0 4px", fontSize: "0.85rem", color: "#9a1a1a" }}>
+                <strong>Fecha:</strong> {formatFechaHora(pedido.anuladoAt)}
+              </p>
+            )}
+            {pedido.anuladoMotivo && (
+              <div style={{ marginTop: "8px", background: "#fff", border: "1px solid #fca5a5", borderRadius: "10px", padding: "10px 14px" }}>
+                <p style={{ margin: "0 0 4px", fontSize: "0.68rem", fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.06em" }}>Motivo</p>
+                <p style={{ margin: 0, fontSize: "0.88rem", color: "#7f1d1d", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{pedido.anuladoMotivo}</p>
+              </div>
+            )}
+          </div>
+
+          {productos.length > 0 && (
+            <>
+              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Contenido · {productos.length} producto{productos.length !== 1 ? "s" : ""}</p>
+              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden", opacity: 0.7 }}>
+                {productos.map((it, i) => {
+                  const raw = it.cod || it.descripcion || it.desc || "";
+                  const uru = toURUCode(raw);
+                  const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                  const qty    = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 16px", borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                      <p style={{ flex: 1, margin: 0, fontSize: "0.86rem", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                      <span style={{ flexShrink: 0, background: "#f1f5f9", color: "#94a3b8", fontWeight: 700, fontSize: "0.82rem", padding: "2px 8px", borderRadius: "8px" }}>×{qty}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+  // ── Fin vista ANULADO ─────────────────────────────────────────────────────
+
+  // ── Vista CANCELADO ───────────────────────────────────────────────────────
+  if (pedido.estado === "CANCELADO") {
+    const formatFechaHora = (ts) => {
+      if (!ts) return "—";
+      const d = ts?.toDate ? ts.toDate() : new Date(ts);
+      if (isNaN(d)) return "—";
+      return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    };
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+    const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh", paddingBottom: "24px" }}>
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px 14px" }}>
+          <VolverListaPedidos to="/pedidos" />
+          <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Pedido #{pedido.numero || id}</p>
+              <h1 style={{ margin: "3px 0 0", fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>{pedido.cliente || "—"}</h1>
+            </div>
+            <span style={{ flexShrink: 0, background: "#f5f3ff", color: "#7c3aed", fontSize: "0.68rem", fontWeight: 700, padding: "4px 10px", borderRadius: "999px", letterSpacing: "0.05em", marginTop: "4px" }}>✕ CANCELADO</span>
+          </div>
+          <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
+            {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🚚 {pedido.metodoEntrega}</span>}
+            {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🏭 {pedido.deposito}</span>}
+          </div>
+        </div>
+
+        <div style={{ padding: "16px", maxWidth: "640px", margin: "0 auto" }}>
+          <div style={{ background: "#faf5ff", border: "1.5px solid #d8b4fe", borderRadius: "14px", padding: "16px 18px", marginBottom: "14px" }}>
+            <p style={{ margin: "0 0 8px", fontSize: "0.68rem", fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.07em" }}>✕ Pedido cancelado por ventas</p>
+            {(pedido.canceladoAt || pedido.updatedAt) && (
+              <p style={{ margin: "0 0 4px", fontSize: "0.85rem", color: "#4c1d95" }}>
+                <strong>Fecha:</strong> {formatFechaHora(pedido.canceladoAt || pedido.updatedAt)}
+              </p>
+            )}
+            {pedido.motivoCancelacion && (
+              <div style={{ marginTop: "8px", background: "#fff", border: "1px solid #d8b4fe", borderRadius: "10px", padding: "10px 14px" }}>
+                <p style={{ margin: "0 0 4px", fontSize: "0.68rem", fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.06em" }}>Motivo</p>
+                <p style={{ margin: 0, fontSize: "0.88rem", color: "#4c1d95", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{pedido.motivoCancelacion}</p>
+              </div>
+            )}
+          </div>
+
+          {productos.length > 0 && (
+            <>
+              <p style={{ margin: "0 0 8px", fontSize: "0.7rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>Contenido · {productos.length} producto{productos.length !== 1 ? "s" : ""}</p>
+              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden", opacity: 0.7 }}>
+                {productos.map((it, i) => {
+                  const raw = it.cod || it.descripcion || it.desc || "";
+                  const uru = toURUCode(raw);
+                  const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                  const qty    = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 16px", borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                      <p style={{ flex: 1, margin: 0, fontSize: "0.86rem", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nombre}</p>
+                      <span style={{ flexShrink: 0, background: "#f1f5f9", color: "#94a3b8", fontWeight: 700, fontSize: "0.82rem", padding: "2px 8px", borderRadius: "8px" }}>×{qty}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+  // ── Fin vista CANCELADO ───────────────────────────────────────────────────
 
   return (
     <div className="p-3 space-y-4">
