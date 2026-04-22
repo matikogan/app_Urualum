@@ -170,12 +170,14 @@ export function mapFinDocToPedido(fin) {
   const cliente = String(fin.CLIENTE || fin.Cliente || "").trim();
   const descripcion = String(fin.DESCRIPCION || fin.Descripcion || "").trim();
 
-  // 2.1) Intentar extraer CÓDIGO de cliente (si el reporte lo trae)
+  // 2.1) Código de cliente — NRODEIDENTIFICACION es el código Finnegans (coincide con RUT)
   const clienteCodigo =
     fin.CLIENTECODIGO || fin.ClienteCodigo ||
     fin.ORGANIZACIONCODIGO || fin.OrganizacionCodigo ||
     fin.CODIGOCLIENTE || fin.CodigoCliente ||
     fin.CLIENTEID || fin.ClienteId ||
+    // fallback: NRODEIDENTIFICACION es el mismo código que usa /cliente/{codigo}
+    fin.NRODEIDENTIFICACION || fin.NroDeIdentificacion ||
     null;
 
   // 3) Depósito / método desde la descripción "ISABELA - RETIRA"
@@ -183,6 +185,8 @@ export function mapFinDocToPedido(fin) {
     deposito: depParsed,
     metodoEntrega: metParsed,
     agencia: agenciaParsed,
+    camionDestino: camionDestinoParsed,
+    camionFechaStr: camionFechaStrParsed,
     esCotizacion,
   } = parseDescripcionPedido(descripcion);
 
@@ -212,7 +216,11 @@ export function mapFinDocToPedido(fin) {
   const condicionPago     = String(fin.CONDICIONPAGO || fin.CondicionPago || "").trim() || null;
   // El código no viene de la API — lo resolvemos desde el nombre
   const condicionPagoCod  = String(fin.CONDICIONPAGOCODIGO || fin.CondicionPagoCodigo || "").trim() || resolverCondicionPagoCod(condicionPago) || null;
-  const clienteRUT        = String(fin.NRODEIDENTIFICACION || fin.NroDeIdentificacion || fin.RUT || "").trim() || null;
+  const clienteRUT        = String(
+    fin.NRODEIDENTIFICACION || fin.NroDeIdentificacion ||
+    fin.IdentificacionTributariaNumero ||
+    fin.RUT || fin.Rut || ""
+  ).trim() || null;
   const cotizacion        = Number(fin.COTIZACION ?? fin.Cotizacion ?? 0) || null;
   const moneda            = String(fin.MONEDA || fin.Moneda || "").trim() || null;
 
@@ -228,6 +236,8 @@ export function mapFinDocToPedido(fin) {
       deposito:        esCotizacion ? "COTIZACION" : (depParsed || null),
       metodoEntrega:   metParsed || null,
       agencia:         agenciaParsed || null,
+      camionDestino:   camionDestinoParsed || null,
+      camionFechaStr:  camionFechaStrParsed || null,
       productos,
       condicionPago,
       condicionPagoCod,

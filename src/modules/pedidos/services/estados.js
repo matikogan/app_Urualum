@@ -6,15 +6,17 @@ export const ESTADOS = {
   PENDIENTE_ASIGNAR: "PENDIENTE_ASIGNAR",
   ASIGNADO: "ASIGNADO",
   EN_PREPARACION: "EN_PREPARACION",
+  CON_ERROR: "CON_ERROR",
   PREPARADO: "PREPARADO",
   CONTROLADO: "CONTROLADO",
   DESPACHADO: "DESPACHADO",
   ANULADO: "ANULADO",
+  CANCELADO: "CANCELADO",
 };
 
 export function puedeTransicionar(de, a) {
-  // ANULADO siempre es destino válido (desde cualquier estado)
-  if (a === "ANULADO") return true;
+  // ANULADO, CON_ERROR y CANCELADO son siempre destinos válidos (desde cualquier estado)
+  if (a === "ANULADO" || a === "CON_ERROR" || a === "CANCELADO") return true;
   const order = new Map(ORDEN_ESTADOS.map((e,i)=>[e,i]));
   return (order.get(a) ?? 999) >= (order.get(de) ?? -1);
 }

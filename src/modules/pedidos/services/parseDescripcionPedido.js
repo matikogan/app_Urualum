@@ -19,6 +19,47 @@ export const AGENCIAS = [
   { nombre: "NORESTE",     orden: 15, alias: ["NORESTE"] },
 ];
 
+/**
+ * Extrae el destino y/o fecha de salida que viene después del keyword "CAMION".
+ * Soporta formatos:
+ *   "CAMION MALDONADO"
+ *   "CAMION 15/04"
+ *   "CAMION 15/04/2026"
+ *   "CAMION MALDONADO 15/04"
+ *   "CAMION RIVERA 15-04-2026"
+ * Retorna { destino: string|null, fechaStr: "YYYY-MM-DD"|null }
+ */
+export function detectarInfoCamion(norm = "") {
+  const match = norm.match(/CAMION\s+(.*)/);
+  if (!match) return { destino: null, fechaStr: null };
+
+  let resto = match[1].trim();
+  if (!resto) return { destino: null, fechaStr: null };
+
+  let fechaStr = null;
+
+  // Intentar extraer fecha: dd/mm, dd/mm/yy, dd/mm/yyyy, dd-mm-yyyy
+  const dateRe = /(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/;
+  const dm = resto.match(dateRe);
+  if (dm) {
+    const day   = dm[1].padStart(2, "0");
+    const month = dm[2].padStart(2, "0");
+    let   year  = dm[3];
+    if (year) {
+      year = year.length === 2 ? `20${year}` : year;
+    } else {
+      year = String(new Date().getFullYear());
+    }
+    fechaStr = `${year}-${month}-${day}`;
+    resto = resto.replace(dm[0], "").trim();
+  }
+
+  // Lo que queda es el destino (solo letras y números)
+  const destino = resto.replace(/[^A-Z0-9\s]/g, "").trim() || null;
+
+  return { destino: destino || null, fechaStr };
+}
+
 /** Intenta detectar la agencia a partir del texto normalizado (sin acentos, en mayúsculas) */
 export function detectarAgencia(norm = "") {
   // Intentar primero en el texto que sigue después de "AGENCIA"
@@ -107,11 +148,22 @@ export function parseDescripcionPedido(descRaw = "") {
     agencia = detectarAgencia(norm);
   }
 
+  // 7) Detectar destino/fecha de camión si el método es CAMION
+  let camionDestino = null;
+  let camionFechaStr = null;
+  if (metodoEntrega === "CAMION") {
+    const info = detectarInfoCamion(norm);
+    camionDestino  = info.destino;
+    camionFechaStr = info.fechaStr;
+  }
+
   return {
-    deposito: deposito || null,
+    deposito:      deposito || null,
     metodoEntrega: metodoEntrega || null,
-    agencia: agencia || null,
-    raw: descRaw,
+    agencia:       agencia || null,
+    camionDestino: camionDestino || null,
+    camionFechaStr: camionFechaStr || null,
+    raw:           descRaw,
     esCotizacion,
   };
 }

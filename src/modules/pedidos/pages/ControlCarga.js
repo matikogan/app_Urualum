@@ -227,9 +227,10 @@ export default function ControlCarga() {
   const { profile } = useAuth();
   const navigate    = useNavigate();
 
-  const [pedidos, setPedidos]   = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [toastMsg, setToastMsg] = useState(null);
+  const [despachados, setDespachados]     = useState([]);
+  const [pendientes,  setPendientes]      = useState([]);
+  const [loading,     setLoading]         = useState(true);
+  const [toastMsg,    setToastMsg]        = useState(null);
 
   const showToast = (msg, tipo = "ok") => {
     setToastMsg({ msg, tipo });
@@ -238,9 +239,9 @@ export default function ControlCarga() {
 
   const depositoUsuario = profile?.deposito || null;
 
-  // ── Suscripción: despachados con metodo AGENCIA (filtros fecha y depósito en cliente)
+  // ── Listener 1: pedidos YA despachados con agencia (esta semana)
   useEffect(() => {
-    const desde = startOfWeek(); // Timestamp
+    const desde = startOfWeek();
     const q = query(
       collection(db, "pedidos_despachados"),
       where("metodoEntrega", "==", "AGENCIA"),
@@ -254,15 +255,31 @@ export default function ControlCarga() {
           if (!at) return true;
           const ms = at?.seconds ? at.seconds * 1000 : new Date(at).getTime();
           if (ms < desdeMs) return false;
-          // Filtrar por depósito del encargado
           if (depositoUsuario && p.deposito && p.deposito !== depositoUsuario) return false;
           return true;
         });
-      setPedidos(docs);
+      setDespachados(docs);
       setLoading(false);
     });
     return () => unsub();
-  }, []);
+  }, [depositoUsuario]);
+
+  // ── Listener 2: pedidos PENDIENTES de despacho con agencia asignada
+  useEffect(() => {
+    if (!depositoUsuario) return;
+    const q = query(
+      collection(db, "pedidos"),
+      where("metodoEntrega", "==", "AGENCIA"),
+      where("deposito",      "==", depositoUsuario),
+    );
+    const unsub = onSnapshot(q, snap => {
+      const docs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(p => p.agencia && p.estado !== "ANULADO");
+      setPendientes(docs);
+    });
+    return () => unsub();
+  }, [depositoUsuario]);
 
   // ── Marcar cargado OK ────────────────────────────────────
   async function marcarCargadoOk(pedidoId) {
@@ -293,23 +310,30 @@ export default function ControlCarga() {
     }
   }
 
-  // ── Agrupar por agencia en orden fijo ────────────────────
+  // ── Agrupar por agencia ────────────────────────────────────
   const agenciaOrder = Object.fromEntries(AGENCIAS.map(a => [a.nombre, a.orden]));
 
   const hoy = startOfDay();
-  const pedidosHoy    = pedidos.filter(p => p.despachadoAt?.seconds >= hoy.seconds);
-  const pedidosPendientes = pedidos.filter(p =>
+  // Despachados: hoy + pendientes de días anteriores sin cargar
+  const despHoy = despachados.filter(p => p.despachadoAt?.seconds >= hoy.seconds);
+  const despAnteriores = despachados.filter(p =>
     p.despachadoAt?.seconds < hoy.seconds && p.cargaEstado !== "CARGADO"
   );
+  const despMostrar = [...despHoy, ...despAnteriores];
 
-  // Solo mostrar pedidos de hoy + pendientes de días anteriores
-  const pedidosMostrar = [...pedidosHoy, ...pedidosPendientes];
-
+  // Armar mapa por agencia: { agencia: { despachados: [], pendientes: [] } }
   const porAgencia = {};
-  for (const p of pedidosMostrar) {
+  for (const p of despMostrar) {
     const ag = p.agencia || "SIN ASIGNAR";
-    if (!porAgencia[ag]) porAgencia[ag] = [];
-    porAgencia[ag].push(p);
+    if (!porAgencia[ag]) porAgencia[ag] = { despachados: [], pendientes: [] };
+    porAgencia[ag].despachados.push(p);
+  }
+  for (const p of pendientes) {
+    const ag = p.agencia || "SIN ASIGNAR";
+    if (!porAgencia[ag]) porAgencia[ag] = { despachados: [], pendientes: [] };
+    // Solo agregar si no está ya en despachados
+    const yaDesp = despMostrar.some(d => d.id === p.id);
+    if (!yaDesp) porAgencia[ag].pendientes.push(p);
   }
 
   const agenciasOrdenadas = Object.keys(porAgencia).sort((a, b) => {
@@ -318,11 +342,12 @@ export default function ControlCarga() {
     return oa - ob;
   });
 
-  // Totales globales
-  const totalPedidos = pedidosMostrar.length;
-  const totalCargados = pedidosMostrar.filter(p => p.cargaEstado === "CARGADO").length;
-  const totalDiscrepancias = pedidosMostrar.filter(p => p.cargaEstado === "DISCREPANCIA").length;
-  const todoCargado = totalPedidos > 0 && (totalCargados + totalDiscrepancias) === totalPedidos;
+  // Totales globales (solo despachados para el progreso de carga)
+  const totalDespachados   = despMostrar.length;
+  const totalCargados      = despMostrar.filter(p => p.cargaEstado === "CARGADO").length;
+  const totalDiscrepancias = despMostrar.filter(p => p.cargaEstado === "DISCREPANCIA").length;
+  const todoCargado = totalDespachados > 0 && (totalCargados + totalDiscrepancias) === totalDespachados;
+  const totalPendientes = pendientes.length;
 
   // ── Función imprimir manifiesto ──────────────────────────
   function imprimirManifiesto() {
@@ -357,9 +382,14 @@ export default function ControlCarga() {
           </p>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          {totalPedidos > 0 && (
+          {totalDespachados > 0 && (
             <span className={`pill ${todoCargado ? "pill--ok" : "pill--warn"}`}>
-              {totalCargados}/{totalPedidos} cargados
+              {totalCargados}/{totalDespachados} cargados
+            </span>
+          )}
+          {totalPendientes > 0 && (
+            <span className="pill" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+              {totalPendientes} por despachar
             </span>
           )}
           {totalDiscrepancias > 0 && (
@@ -376,42 +406,40 @@ export default function ControlCarga() {
       </header>
 
       {/* ── Sin pedidos ── */}
-      {totalPedidos === 0 && (
+      {totalDespachados === 0 && totalPendientes === 0 && (
         <div style={{ textAlign: "center", padding: "64px 20px", color: "#94a3b8" }}>
           <div style={{ fontSize: "48px", marginBottom: "12px" }}>📭</div>
           <strong style={{ color: "#334155", display: "block", fontSize: "16px", marginBottom: "6px" }}>
-            No hay pedidos de agencia para hoy
+            No hay pedidos de agencia
           </strong>
           <span style={{ fontSize: "13px" }}>
-            Los pedidos despachados con agencia aparecerán acá
+            Los pedidos con agencia asignada aparecerán acá
           </span>
         </div>
       )}
 
-      {/* ── Pedidos pendientes de días anteriores ── */}
-      {pedidosPendientes.length > 0 && (
+      {/* ── Aviso días anteriores ── */}
+      {despAnteriores.length > 0 && (
         <div style={{
           background: "#fff7ed", border: "1.5px solid #fed7aa",
           borderRadius: "10px", padding: "10px 14px", marginBottom: "16px",
           fontSize: "13px", color: "#92400e",
         }}>
-          ⚠️ Hay <strong>{pedidosPendientes.length} pedido{pedidosPendientes.length > 1 ? "s" : ""}</strong> de días anteriores sin cargar incluidos abajo.
+          ⚠️ Hay <strong>{despAnteriores.length} pedido{despAnteriores.length > 1 ? "s" : ""}</strong> de días anteriores sin cargar incluidos abajo.
         </div>
       )}
 
       {/* ── Secciones por agencia ── */}
       <div id="manifiesto-contenido" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
         {agenciasOrdenadas.map(agNombre => {
-          const peds = porAgencia[agNombre];
-          const cargados = peds.filter(p => p.cargaEstado === "CARGADO").length;
-          const discrepancias = peds.filter(p => p.cargaEstado === "DISCREPANCIA").length;
-          const listos = cargados + discrepancias;
-          const todoListo = listos === peds.length;
+          const { despachados: desps, pendientes: pends } = porAgencia[agNombre];
+          const cargados     = desps.filter(p => p.cargaEstado === "CARGADO").length;
+          const discrepancias = desps.filter(p => p.cargaEstado === "DISCREPANCIA").length;
+          const listos       = cargados + discrepancias;
+          const todoListo    = desps.length > 0 && listos === desps.length;
           const ag = AGENCIAS.find(a => a.nombre === agNombre);
-
-          // Totales por agencia
-          const totalPaq = peds.reduce((s, p) => s + (Number(p.paquetes) || 0), 0);
-          const totalBto = peds.reduce((s, p) => s + (Number(p.bultos) || 0), 0);
+          const totalPaq = desps.reduce((s, p) => s + (Number(p.paquetes) || 0), 0);
+          const totalBto = desps.reduce((s, p) => s + (Number(p.bultos) || 0), 0);
 
           return (
             <div key={agNombre} className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -426,35 +454,86 @@ export default function ControlCarga() {
                   <span style={{ fontWeight: 800, fontSize: "15px", color: "#0f172a" }}>
                     {ag ? `${ag.orden}. ${agNombre}` : agNombre}
                   </span>
-                  <span style={{
-                    marginLeft: "10px", fontSize: "12px", color: "#64748b",
-                  }}>
-                    📦 {totalPaq} paq. · 📫 {totalBto} btos.
-                  </span>
+                  {desps.length > 0 && (
+                    <span style={{ marginLeft: "10px", fontSize: "12px", color: "#64748b" }}>
+                      📦 {totalPaq} paq. · 📫 {totalBto} btos.
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                  <span style={{
-                    fontSize: "12px", fontWeight: 600,
-                    color: todoListo ? "#166534" : "#64748b",
-                    background: todoListo ? "#dcfce7" : "#f1f5f9",
-                    padding: "3px 10px", borderRadius: "20px",
-                  }}>
-                    {todoListo ? "✓ Completo" : `${listos}/${peds.length}`}
-                  </span>
+                  {desps.length > 0 && (
+                    <span style={{
+                      fontSize: "12px", fontWeight: 600,
+                      color: todoListo ? "#166534" : "#64748b",
+                      background: todoListo ? "#dcfce7" : "#f1f5f9",
+                      padding: "3px 10px", borderRadius: "20px",
+                    }}>
+                      {todoListo ? "✓ Completo" : `${listos}/${desps.length}`}
+                    </span>
+                  )}
+                  {pends.length > 0 && (
+                    <span style={{
+                      fontSize: "12px", fontWeight: 600,
+                      background: "#eff6ff", color: "#1d4ed8",
+                      padding: "3px 10px", borderRadius: "20px",
+                    }}>
+                      {pends.length} por despachar
+                    </span>
+                  )}
                 </div>
               </div>
 
-              {/* Tarjetas de pedidos */}
-              <div style={{ padding: "12px 12px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                {peds.map(p => (
-                  <PedidoCard
-                    key={p.id}
-                    p={p}
-                    onCargadoOk={marcarCargadoOk}
-                    onDiscrepancia={marcarDiscrepancia}
-                  />
-                ))}
-              </div>
+              {/* Pedidos YA despachados */}
+              {desps.length > 0 && (
+                <div style={{ padding: "12px 12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {desps.map(p => (
+                    <PedidoCard
+                      key={p.id}
+                      p={p}
+                      onCargadoOk={marcarCargadoOk}
+                      onDiscrepancia={marcarDiscrepancia}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Pedidos PENDIENTES de despacho */}
+              {pends.length > 0 && (
+                <>
+                  {desps.length > 0 && (
+                    <div style={{ borderTop: "1px dashed #cbd5e1", margin: "0 12px" }} />
+                  )}
+                  <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <p style={{ margin: "0 0 6px", fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      🕐 Pendientes de despacho
+                    </p>
+                    {pends.map(p => (
+                      <div key={p.id} style={{
+                        background: "#f8fafc", border: "1.5px solid #e2e8f0",
+                        borderRadius: "10px", padding: "11px 14px",
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        opacity: 0.85,
+                      }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: "13px", color: "#334155" }}>
+                            {p.numero || p.id}
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                            {p.cliente}
+                          </div>
+                        </div>
+                        <span style={{
+                          fontSize: "11px", fontWeight: 600,
+                          background: "#f1f5f9", color: "#64748b",
+                          padding: "4px 10px", borderRadius: "20px", flexShrink: 0,
+                        }}>
+                          {p.estado?.replace("_", " ") || "—"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           );
         })}

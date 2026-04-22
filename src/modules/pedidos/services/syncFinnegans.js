@@ -2,6 +2,17 @@ import { getPedidosPendientes } from "../../../API/finnegans";
 import { upsertPedidoDesdeFinnegans } from "./pedidosFS";
 import { mapFinDocToPedido } from "./mapFinnegans";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { collection, getDocs, query, where, getDoc, doc } from "firebase/firestore";
+import { db } from "../../../firebase";
+
+/** Lee el número de días hacia atrás configurado por el admin (default 15). */
+async function getSyncDiasAtras() {
+  try {
+    const snap = await getDoc(doc(db, "config", "sync"));
+    if (snap.exists()) return snap.data().diasAtras ?? 15;
+  } catch { /* usa default */ }
+  return 15;
+}
 
 function toYMD(d) {
   const iso = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
@@ -51,10 +62,12 @@ function lastNDaysRange(n = 7) {
 export async function syncPendientesDeHoy({ debug = false } = {}) {
     await waitForAuthUser();
 
-    // --- ÚLTIMOS 5 DÍAS ---
+    // Lee la cantidad de días configurada por el admin (o usa 15 como default)
+    const diasAtras = await getSyncDiasAtras();
+
     const hoy = new Date();
     const desde = new Date();
-    desde.setDate(hoy.getDate() - 15); // últimos 15 días para detectar anulaciones
+    desde.setDate(hoy.getDate() - diasAtras);
 
     const fechaDesde = toYMD(desde);
     const fechaHasta = toYMD(hoy);
@@ -173,6 +186,68 @@ export async function syncPedidosDeHoy(pedidosFinnegans) {
   return resumen;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTO-ASIGNACIÓN DE CAMIÓN
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Dado un pedido con { camionDestino, camionFechaStr, deposito } y la lista
+ * de camiones disponibles para ese depósito, intenta encontrar el camión
+ * más adecuado.
+ *
+ * Estrategia (por orden de prioridad):
+ *  1. Coincidencia exacta de fecha (camionFechaStr == fechaSalida del camión)
+ *  2. Coincidencia de destino/descripción (camionDestino ⊂ descripcion del camión)
+ *  3. Si solo hay un camión futuro para ese depósito → lo asigna
+ *
+ * Solo considera camiones cuya fechaSalida sea >= ayer (1 día de tolerancia).
+ */
+function resolverCamionId(pedido, camiones) {
+  if (!camiones.length) return null;
+
+  const normalize = s =>
+    String(s || "")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase().trim();
+
+  // Filtrar candidatos: fechaSalida >= ayer
+  const ayer = Date.now() - 24 * 60 * 60 * 1000;
+  const candidatos = camiones.filter(c => {
+    const ms = c.fechaSalida?.seconds ? c.fechaSalida.seconds * 1000 : 0;
+    return ms >= ayer;
+  });
+  if (!candidatos.length) return null;
+
+  // Ordenar por fecha más próxima primero
+  candidatos.sort((a, b) => (a.fechaSalida?.seconds || 0) - (b.fechaSalida?.seconds || 0));
+
+  // 1) Match por fecha exacta
+  if (pedido.camionFechaStr) {
+    const porFecha = candidatos.find(c => {
+      if (!c.fechaSalida?.seconds) return false;
+      const d = new Date(c.fechaSalida.seconds * 1000);
+      const ymd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      return ymd === pedido.camionFechaStr;
+    });
+    if (porFecha) return porFecha.id;
+  }
+
+  // 2) Match por destino (texto en descripcion del camión)
+  if (pedido.camionDestino) {
+    const destNorm = normalize(pedido.camionDestino);
+    const porDest = candidatos.find(c => {
+      const cDesc = normalize(c.descripcion);
+      return cDesc.includes(destNorm) || destNorm.includes(cDesc);
+    });
+    if (porDest) return porDest.id;
+  }
+
+  // 3) Si hay un único camión futuro → asignarlo directamente
+  if (candidatos.length === 1) return candidatos[0].id;
+
+  return null;
+}
+
 // Helpers para detectar claves de código/cantidad en items de productos
 function getCodeKey(item) {
   const keys = ["cod", "codigo", "productCode", "ProductoCodigo", "productoCodigo"];
@@ -264,7 +339,47 @@ export async function syncNuevosPedidos({ fechaDesde, fechaHasta, debug = false 
     }
   }
 
-  // 2) Upsert por pedido
+  // 2) Auto-asignación de camión para pedidos CAMION sin camionId
+  try {
+    // Detectar depósitos únicos presentes en el batch
+    const depositos = [...new Set(
+      [...pedidosMap.values()]
+        .filter(p => p.metodoEntrega === "CAMION")
+        .map(p => p.deposito)
+        .filter(Boolean)
+    )];
+
+    if (depositos.length > 0) {
+      // Cargar camiones activos por depósito (una query por depósito)
+      const camionesPorDeposito = {};
+      for (const dep of depositos) {
+        const snapCam = await getDocs(
+          query(collection(db, "camiones"), where("deposito", "==", dep))
+        );
+        camionesPorDeposito[dep] = snapCam.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+
+      // Intentar resolver camionId para cada pedido CAMION sin asignación
+      let autoAsignados = 0;
+      for (const pedido of pedidosMap.values()) {
+        if (pedido.metodoEntrega !== "CAMION" || pedido.camionId) continue;
+        const camiones = camionesPorDeposito[pedido.deposito] || [];
+        const camionId = resolverCamionId(pedido, camiones);
+        if (camionId) {
+          pedido.camionId = camionId;
+          autoAsignados++;
+        }
+      }
+      if (debug && autoAsignados > 0) {
+        console.log(`[SYNC] Auto-asignados a camión: ${autoAsignados} pedido(s)`);
+      }
+    }
+  } catch (e) {
+    // No bloquear el sync si falla la auto-asignación de camiones
+    console.warn("[SYNC] Error en auto-asignación de camiones:", e?.message || e);
+  }
+
+  // 3) Upsert por pedido
   let created = 0, updated = 0, skipped = 0;
   let noId = 0, permDenied = 0, otherErr = 0;
 

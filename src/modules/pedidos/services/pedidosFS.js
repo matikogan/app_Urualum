@@ -299,6 +299,13 @@ export async function upsertPedidoDesdeFinnegans(pedidoInput) {
   const ref = doc(db, "pedidos", canonicalId);
   const prevSnap = await getDoc(ref);
 
+  // Si el pedido no existe en 'pedidos', verificar si ya fue despachado localmente.
+  // Si está en 'pedidos_despachados', no recrearlo — evita que el sync "resucite"
+  // pedidos que ventas ya despachó pero Finnegans todavía muestra como pendientes.
+  if (!prevSnap.exists()) {
+    const despachadoSnap = await getDoc(doc(db, "pedidos_despachados", canonicalId));
+    if (despachadoSnap.exists()) return { skipped: true };
+  }
 
   const prev = prevSnap.exists() ? prevSnap.data() : {};
 
@@ -535,6 +542,22 @@ export async function updateEstado(pedidoId, nuevoEstado) {
     estado: nuevoEstado,
     updatedAt: serverTimestamp(),
     [`timestamps.${nuevoEstado}`]: serverTimestamp(),
+  });
+}
+
+/**
+ * Cancelar / anular un pedido con motivo.
+ */
+export async function cancelarPedido(pedidoId, motivo, uid) {
+  if (!pedidoId) throw new Error("Pedido inválido");
+  const ref = doc(db, "pedidos", pedidoId);
+  await updateDoc(ref, {
+    estado: "ANULADO",
+    anuladoMotivo: motivo || null,
+    anuladoPor: uid || null,
+    anuladoAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    "timestamps.ANULADO": serverTimestamp(),
   });
 }
 

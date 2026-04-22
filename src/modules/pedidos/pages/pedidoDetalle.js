@@ -2014,39 +2014,57 @@ const filteredOperarios = useMemo(() => {
 
         {/* ── CTA fijo ── */}
         <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 16px 20px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)" }}>
-          {!allAccChecked && prodsEncargado.length > 0 && (
-            <p style={{ margin: "0 0 8px", textAlign: "center", fontSize: "0.78rem", color: "#94a3b8" }}>
-              Verificá {prodsEncargado.filter((_, i) => !accChecks[`acc-${i}`]).length} accesorio{prodsEncargado.filter((_, i) => !accChecks[`acc-${i}`]).length !== 1 ? "s" : ""} pendiente{prodsEncargado.filter((_, i) => !accChecks[`acc-${i}`]).length !== 1 ? "s" : ""}
-            </p>
+          {pedido.deposito === "ISABELA" ? (
+            // ISABELA: no hay paso de control del encargado — ventas despacha directamente desde PREPARADO
+            <div style={{
+              background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: "14px",
+              padding: "14px 16px", textAlign: "center",
+            }}>
+              <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: "#15803d" }}>
+                ✅ Pedido listo para despachar
+              </p>
+              <p style={{ margin: "4px 0 0", fontSize: "0.78rem", color: "#64748b" }}>
+                El usuario ventas realizará el despacho
+              </p>
+            </div>
+          ) : (
+            // R8: el encargado confirma el control antes de que ventas despache
+            <>
+              {!allAccChecked && prodsEncargado.length > 0 && (
+                <p style={{ margin: "0 0 8px", textAlign: "center", fontSize: "0.78rem", color: "#94a3b8" }}>
+                  Verificá {prodsEncargado.filter((_, i) => !accChecks[`acc-${i}`]).length} accesorio{prodsEncargado.filter((_, i) => !accChecks[`acc-${i}`]).length !== 1 ? "s" : ""} pendiente{prodsEncargado.filter((_, i) => !accChecks[`acc-${i}`]).length !== 1 ? "s" : ""}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    setSaving(true);
+                    await updateDoc(doc(db, "pedidos", id), { prepAccesoriosOk: true });
+                    await updateEstado(id, ESTADOS.CONTROLADO);
+                    haptics?.success?.();
+                    toast.success("Pedido controlado ✓");
+                    setPedido(prev => prev ? { ...prev, estado: ESTADOS.CONTROLADO } : prev);
+                  } catch (e) {
+                    toast.error("No se pudo confirmar el control");
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+                disabled={!allAccChecked || saving}
+                style={{
+                  width: "100%", padding: "15px", borderRadius: "14px", border: "none",
+                  fontWeight: 700, fontSize: "1rem",
+                  background: allAccChecked ? "#0f172a" : "#e2e8f0",
+                  color: allAccChecked ? "#fff" : "#94a3b8",
+                  cursor: allAccChecked ? "pointer" : "not-allowed",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {saving ? "Confirmando…" : "✓ Confirmar control"}
+              </button>
+            </>
           )}
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                setSaving(true);
-                await updateDoc(doc(db, "pedidos", id), { prepAccesoriosOk: true });
-                await updateEstado(id, ESTADOS.CONTROLADO);
-                haptics?.success?.();
-                toast.success("Pedido controlado ✓");
-                setPedido(prev => prev ? { ...prev, estado: ESTADOS.CONTROLADO } : prev);
-              } catch (e) {
-                toast.error("No se pudo confirmar el control");
-              } finally {
-                setSaving(false);
-              }
-            }}
-            disabled={!allAccChecked || saving}
-            style={{
-              width: "100%", padding: "15px", borderRadius: "14px", border: "none",
-              fontWeight: 700, fontSize: "1rem",
-              background: allAccChecked ? "#0f172a" : "#e2e8f0",
-              color: allAccChecked ? "#fff" : "#94a3b8",
-              cursor: allAccChecked ? "pointer" : "not-allowed",
-              transition: "all 0.2s ease",
-            }}
-          >
-            {saving ? "Confirmando…" : "✓ Confirmar control"}
-          </button>
         </div>
       </div>
     );
@@ -2270,8 +2288,9 @@ const filteredOperarios = useMemo(() => {
   }
   // ── Fin vista CON_ERROR ventas ─────────────────────────────────────────────
 
-  // ── Vista CONTROLADO — VENTAS (detalle completo + despacho) ──────────────
-  if (pedido.estado === ESTADOS.CONTROLADO && isVentas) {
+  // ── Vista PREPARADO/CONTROLADO — VENTAS (detalle completo + despacho) ──────
+  // ISABELA despacha desde PREPARADO; R8 despacha desde CONTROLADO.
+  if ((pedido.estado === ESTADOS.CONTROLADO || pedido.estado === ESTADOS.PREPARADO) && isVentas) {
     const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
     const formatFecha = (f) => {
       if (!f) return "—";
@@ -2295,14 +2314,21 @@ const filteredOperarios = useMemo(() => {
     const avatarInitial = operarioNombre[0]?.toUpperCase() || "?";
     const preparadoElapsed = getElapsedStr(pedido.timestamps?.PREPARADO);
 
-    // Timeline de estados
-    const timelineEstados = [
-      { key: "PENDIENTE_ASIGNAR", label: "Ingresó" },
-      { key: "ASIGNADO", label: "Asignado" },
-      { key: "EN_PREPARACION", label: "En preparación" },
-      { key: "PREPARADO", label: "Preparado" },
-      { key: "CONTROLADO", label: "Controlado" },
-    ];
+    // Timeline de estados — simplificado para ISABELA (sin ASIGNADO ni CONTROLADO)
+    const esIsabela = pedido.deposito === "ISABELA";
+    const timelineEstados = esIsabela
+      ? [
+          { key: "PENDIENTE_ASIGNAR", label: "Ingresó" },
+          { key: "EN_PREPARACION", label: "En preparación" },
+          { key: "PREPARADO", label: "Preparado" },
+        ]
+      : [
+          { key: "PENDIENTE_ASIGNAR", label: "Ingresó" },
+          { key: "ASIGNADO", label: "Asignado" },
+          { key: "EN_PREPARACION", label: "En preparación" },
+          { key: "PREPARADO", label: "Preparado" },
+          { key: "CONTROLADO", label: "Controlado" },
+        ];
 
     /* ── helper: lista de productos reutilizable ── */
     const ProductList = ({ items, accentBg, accentColor, borderColor }) => (
@@ -2384,7 +2410,7 @@ const filteredOperarios = useMemo(() => {
                   const ts = pedido.timestamps?.[key];
                   const at = ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
                   const done = !!at && !isNaN(at);
-                  const isCurrent = key === "CONTROLADO";
+                  const isCurrent = key === pedido.estado;
                   return (
                     <div key={key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
                       {i > 0 && <div style={{ position: "absolute", top: "11px", right: "50%", left: "-50%", height: "2px", background: done ? "#a855f7" : "#e2e8f0", zIndex: 0 }} />}
