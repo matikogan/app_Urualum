@@ -598,12 +598,14 @@ export default function PedidoDetalle() {
 
 
 
-  // ISABELA: si el pedido está DESPACHADO en la colección pedidos, redirigir al control de entrega
+  // ISABELA + R8: si el pedido está DESPACHADO en la colección pedidos,
+  // el encargado va directo al control de entrega.
+  const isEncargadoR8 = isEncargado && profile?.deposito === "R8";
   useEffect(() => {
-    if (isIsabela && pedido?.estado === "DESPACHADO") {
+    if ((isIsabela || isEncargadoR8) && pedido?.estado === "DESPACHADO") {
       navigate(`/encargado/entrega/${id}`, { replace: true });
     }
-  }, [isIsabela, pedido?.estado, id, navigate]);
+  }, [isIsabela, isEncargadoR8, pedido?.estado, id, navigate]);
 
   // resetear checks cuando cambia el pedido
   useEffect(() => {
@@ -2142,8 +2144,173 @@ const filteredOperarios = useMemo(() => {
   }
   // ── Fin vista CONTROLADO encargado ────────────────────────────────────────
 
-  // ── Vista CON_ERROR — VENTAS ──────────────────────────────────────────────
-  if (pedido.estado === ESTADOS.CON_ERROR && isVentas) {
+  // ── Vista CON_ERROR — ENCARGADO R8 (revisa y decide antes de escalar a ventas) ──
+  if (pedido.estado === ESTADOS.CON_ERROR && isEncargado && pedido.deposito === "R8") {
+    const productos  = Array.isArray(pedido.productos) ? pedido.productos : [];
+    const errorProds = Array.isArray(pedido.errorProductos) && pedido.errorProductos.length > 0
+      ? pedido.errorProductos
+      : pedido.errorProductoNombre
+        ? [{ cod: pedido.errorProductoCod || null, nombre: pedido.errorProductoNombre, tipo: null }]
+        : [];
+    const TIPO_LABELS = { sin_stock: "Sin stock", danado: "Dañado / abollado", hay_menos: "Hay menos de lo pedido" };
+
+    async function handleConfirmarError() {
+      try {
+        setSaving(true);
+        await updateEstado(id, ESTADOS.ERROR_CONFIRMADO);
+        toast.success("Error confirmado — ventas fue notificado");
+      } catch (e) {
+        console.error(e);
+        toast.error(e?.message || "No se pudo confirmar el error");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    async function handleDevolverPreparacion() {
+      try {
+        setSaving(true);
+        await updateEstado(id, ESTADOS.EN_PREPARACION, {
+          errorDetalle: null, errorProductoCod: null,
+          errorProductoNombre: null, errorProductos: [],
+        });
+        toast.success("Pedido devuelto a preparación");
+      } catch (e) {
+        console.error(e);
+        toast.error(e?.message || "No se pudo devolver el pedido");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh" }}>
+        {/* Header */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "14px 20px", position: "sticky", top: 0, zIndex: 10 }}>
+          <div style={{ maxWidth: "760px", margin: "0 auto", display: "flex", alignItems: "center", gap: "12px" }}>
+            <button onClick={() => navigate("/pedidos")}
+              style={{ width: "34px", height: "34px", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem", flexShrink: 0 }}>
+              ←
+            </button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: "0.72rem", color: "#94a3b8" }}>Pedido #{pedido.numero || id}</p>
+              <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {pedido.cliente || "—"}
+              </p>
+            </div>
+            <span style={{ background: "#fff7ed", border: "1.5px solid #fed7aa", borderRadius: "999px", padding: "4px 12px", fontSize: "0.72rem", fontWeight: 700, color: "#c2410c", flexShrink: 0 }}>
+              ⚠️ Error · revisar
+            </span>
+          </div>
+        </div>
+
+        <div style={{ maxWidth: "760px", margin: "0 auto", padding: "16px 20px 100px" }}>
+
+          {/* Info básica */}
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 20px", marginBottom: "14px" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px", marginBottom: "10px" }}>
+              <div>
+                <p style={{ margin: 0, fontSize: "1.25rem", fontWeight: 800, color: "#0f172a" }}>#{pedido.numero || id}</p>
+                <p style={{ margin: "2px 0 0", fontSize: "0.95rem", color: "#334155" }}>{pedido.cliente || "—"}</p>
+              </div>
+              {pedido.operarioNombre && (
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <p style={{ margin: 0, fontSize: "0.68rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Preparado por</p>
+                  <p style={{ margin: "2px 0 0", fontSize: "0.85rem", fontWeight: 700, color: "#334155" }}>👤 {pedido.operarioNombre}</p>
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📅 {pedido.finFecha}</span>}
+              {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🚚 {pedido.metodoEntrega}</span>}
+            </div>
+          </div>
+
+          {/* Banner error reportado por operario */}
+          <div style={{ background: "#fff7ed", border: "1.5px solid #fed7aa", borderRadius: "14px", padding: "16px 20px", marginBottom: "14px" }}>
+            <p style={{ margin: "0 0 6px", fontSize: "0.78rem", fontWeight: 700, color: "#c2410c", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              ⚠️ El operario reportó un problema
+            </p>
+            <p style={{ margin: 0, fontSize: "0.88rem", color: "#9a3412", lineHeight: 1.5 }}>
+              Revisá los productos con error. Podés <strong>confirmar el error</strong> para notificar a ventas, o <strong>devolver a preparación</strong> si el operario puede resolverlo.
+            </p>
+            {pedido.errorDetalle && (
+              <div style={{ marginTop: "10px", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: "8px", padding: "10px 12px" }}>
+                <p style={{ margin: 0, fontSize: "0.78rem", fontWeight: 700, color: "#92400e", marginBottom: "4px" }}>Nota del operario</p>
+                <p style={{ margin: 0, fontSize: "0.85rem", color: "#78350f", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{pedido.errorDetalle}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Productos con error destacados */}
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden", marginBottom: "14px" }}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #f1f5f9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Productos · {productos.length}
+              </span>
+              {errorProds.length > 0 && (
+                <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#c2410c", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "999px", padding: "2px 8px" }}>
+                  {errorProds.length} con error
+                </span>
+              )}
+            </div>
+            {productos.map((it, i) => {
+              const cod     = it.cod || it.codigo || "";
+              const nombre  = it.descripcion || it.desc || it.nombre || cod || "—";
+              const qty     = it.cant ?? it.cantidad ?? it.qty ?? 0;
+              const errInfo = errorProds.find(p => (p.cod && p.cod === cod) || p.nombre === nombre);
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "flex-start", gap: "12px",
+                  padding: "12px 16px",
+                  borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none",
+                  background: errInfo ? "#fff7ed" : "#fff",
+                  borderLeft: `4px solid ${errInfo ? "#c2410c" : "transparent"}`,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: errInfo ? 700 : 500, color: errInfo ? "#9a3412" : "#1e293b" }}>
+                      {errInfo && <span style={{ marginRight: "4px" }}>⚠️</span>}{nombre}
+                    </p>
+                    {errInfo?.tipo && (
+                      <p style={{ margin: "3px 0 0", fontSize: "0.78rem", color: "#c2410c", fontWeight: 600 }}>
+                        {TIPO_LABELS[errInfo.tipo] || errInfo.tipo}
+                        {errInfo.tipo === "hay_menos" && errInfo.cant ? ` · disponibles: ${errInfo.cant}` : ""}
+                      </p>
+                    )}
+                  </div>
+                  <span style={{ flexShrink: 0, fontWeight: 700, fontSize: "0.82rem", padding: "3px 9px", borderRadius: "8px", background: errInfo ? "#fed7aa" : "#f1f5f9", color: errInfo ? "#9a3412" : "#475569" }}>
+                    ×{qty}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Botones fijos */}
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 20px 24px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)", display: "flex", gap: "10px" }}>
+          <button
+            onClick={handleDevolverPreparacion}
+            disabled={saving}
+            style={{ flex: 1, padding: "14px", borderRadius: "12px", border: "1.5px solid #e2e8f0", background: "#fff", color: "#334155", fontWeight: 700, fontSize: "0.9rem", cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.6 : 1 }}
+          >
+            🔄 Devolver a preparación
+          </button>
+          <button
+            onClick={handleConfirmarError}
+            disabled={saving}
+            style={{ flex: 1, padding: "14px", borderRadius: "12px", border: "none", background: saving ? "#e2e8f0" : "#dc2626", color: saving ? "#94a3b8" : "#fff", fontWeight: 700, fontSize: "0.9rem", cursor: saving ? "not-allowed" : "pointer", boxShadow: saving ? "none" : "0 2px 8px rgba(220,38,38,0.3)" }}
+          >
+            🔴 Confirmar error → ventas
+          </button>
+        </div>
+      </div>
+    );
+  }
+  // ── Fin vista CON_ERROR encargado R8 ─────────────────────────────────────
+
+  // ── Vista CON_ERROR — VENTAS (solo ISABELA: el error va directo a ventas) ──
+  if (pedido.estado === ESTADOS.CON_ERROR && isVentas && pedido.deposito === "ISABELA") {
     const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
     const TIPO_LABELS = { sin_stock: "No hay stock", danado: "Dañado / abollado", hay_menos: "Hay menos de lo pedido" };
 
@@ -2286,7 +2453,159 @@ const filteredOperarios = useMemo(() => {
       </div>
     );
   }
-  // ── Fin vista CON_ERROR ventas ─────────────────────────────────────────────
+  // ── Fin vista CON_ERROR ventas (ISABELA) ──────────────────────────────────
+
+  // ── Vista ERROR_CONFIRMADO — R8 (ventas ve el error confirmado; encargado puede resolver) ──
+  if (pedido.estado === ESTADOS.ERROR_CONFIRMADO && pedido.deposito === "R8") {
+    const productos  = Array.isArray(pedido.productos) ? pedido.productos : [];
+    const errorProds = Array.isArray(pedido.errorProductos) && pedido.errorProductos.length > 0
+      ? pedido.errorProductos
+      : pedido.errorProductoNombre
+        ? [{ cod: pedido.errorProductoCod || null, nombre: pedido.errorProductoNombre, tipo: null }]
+        : [];
+    const TIPO_LABELS = { sin_stock: "Sin stock", danado: "Dañado / abollado", hay_menos: "Hay menos de lo pedido" };
+
+    async function handleResolverError() {
+      try {
+        setSaving(true);
+        await updateEstado(id, ESTADOS.EN_PREPARACION, {
+          errorDetalle: null, errorProductoCod: null,
+          errorProductoNombre: null, errorProductos: [],
+        });
+        toast.success("Pedido devuelto a preparación");
+      } catch (e) {
+        console.error(e);
+        toast.error(e?.message || "No se pudo resolver el error");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <div style={{ background: "#f8fafc", minHeight: "100vh" }}>
+        {/* Header */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "14px 20px", position: "sticky", top: 0, zIndex: 10 }}>
+          <div style={{ maxWidth: "760px", margin: "0 auto", display: "flex", alignItems: "center", gap: "12px" }}>
+            <button
+              onClick={() => navigate(isVentas ? "/ventas/para-despachar" : "/pedidos")}
+              style={{ width: "34px", height: "34px", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem", flexShrink: 0 }}>
+              ←
+            </button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: "0.72rem", color: "#94a3b8" }}>Pedido #{pedido.numero || id}</p>
+              <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {pedido.cliente || "—"}
+              </p>
+            </div>
+            <span style={{ background: "#fff1f2", border: "1.5px solid #fca5a5", borderRadius: "999px", padding: "4px 12px", fontSize: "0.72rem", fontWeight: 700, color: "#b91c1c", flexShrink: 0 }}>
+              🔴 Con error
+            </span>
+          </div>
+        </div>
+
+        <div style={{ maxWidth: "760px", margin: "0 auto", padding: "16px 20px 100px" }}>
+
+          {/* Info básica */}
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 20px", marginBottom: "14px" }}>
+            <p style={{ margin: "0 0 2px", fontSize: "1.25rem", fontWeight: 800, color: "#0f172a" }}>#{pedido.numero || id}</p>
+            <p style={{ margin: "0 0 10px", fontSize: "0.95rem", color: "#334155" }}>{pedido.cliente || "—"}</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>📅 {pedido.finFecha}</span>}
+              {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🚚 {pedido.metodoEntrega}</span>}
+              {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "2px 8px" }}>🏭 {pedido.deposito}</span>}
+            </div>
+          </div>
+
+          {/* Banner según rol */}
+          {isVentas ? (
+            <div style={{ background: "#fff1f2", border: "1.5px solid #fca5a5", borderRadius: "14px", padding: "16px 20px", marginBottom: "14px" }}>
+              <p style={{ margin: "0 0 6px", fontSize: "0.78rem", fontWeight: 700, color: "#b91c1c", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                🔴 Error confirmado — acción requerida
+              </p>
+              <p style={{ margin: 0, fontSize: "0.88rem", color: "#7f1d1d", lineHeight: 1.5 }}>
+                El encargado confirmó el error. Hacé la corrección en <strong>Finnegans</strong> y avisale al encargado para que devuelva el pedido a preparación.
+              </p>
+            </div>
+          ) : (
+            <div style={{ background: "#fff1f2", border: "1.5px solid #fca5a5", borderRadius: "14px", padding: "16px 20px", marginBottom: "14px" }}>
+              <p style={{ margin: "0 0 6px", fontSize: "0.78rem", fontWeight: 700, color: "#b91c1c", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Esperando corrección de ventas
+              </p>
+              <p style={{ margin: 0, fontSize: "0.88rem", color: "#7f1d1d", lineHeight: 1.5 }}>
+                Ventas está corrigiendo el pedido en Finnegans. Una vez resuelto, usá el botón para devolver al operario.
+              </p>
+            </div>
+          )}
+
+          {/* Nota del encargado */}
+          {pedido.errorDetalle && (
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "14px 16px", marginBottom: "14px" }}>
+              <p style={{ margin: "0 0 4px", fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>Nota del encargado</p>
+              <p style={{ margin: 0, fontSize: "0.88rem", color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{pedido.errorDetalle}</p>
+            </div>
+          )}
+
+          {/* Productos */}
+          <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden" }}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #f1f5f9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Productos · {productos.length}
+              </span>
+              {errorProds.length > 0 && (
+                <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#b91c1c", background: "#fff1f2", border: "1px solid #fca5a5", borderRadius: "999px", padding: "2px 8px" }}>
+                  {errorProds.length} con error
+                </span>
+              )}
+            </div>
+            {productos.map((it, i) => {
+              const cod     = it.cod || it.codigo || "";
+              const nombre  = it.descripcion || it.desc || it.nombre || cod || "—";
+              const qty     = it.cant ?? it.cantidad ?? it.qty ?? 0;
+              const errInfo = errorProds.find(p => (p.cod && p.cod === cod) || p.nombre === nombre);
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "flex-start", gap: "12px",
+                  padding: "12px 16px",
+                  borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none",
+                  background: errInfo ? "#fff1f2" : "#fff",
+                  borderLeft: `4px solid ${errInfo ? "#b91c1c" : "transparent"}`,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: errInfo ? 700 : 500, color: errInfo ? "#7f1d1d" : "#1e293b" }}>
+                      {errInfo && <span style={{ marginRight: "4px" }}>🔴</span>}{nombre}
+                    </p>
+                    {errInfo?.tipo && (
+                      <p style={{ margin: "3px 0 0", fontSize: "0.78rem", color: "#b91c1c", fontWeight: 600 }}>
+                        {TIPO_LABELS[errInfo.tipo] || errInfo.tipo}
+                        {errInfo.tipo === "hay_menos" && errInfo.cant ? ` · disponibles: ${errInfo.cant}` : ""}
+                      </p>
+                    )}
+                  </div>
+                  <span style={{ flexShrink: 0, fontWeight: 700, fontSize: "0.82rem", padding: "3px 9px", borderRadius: "8px", background: errInfo ? "#fecaca" : "#f1f5f9", color: errInfo ? "#7f1d1d" : "#475569" }}>
+                    ×{qty}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Botón fijo — solo encargado puede resolver */}
+        {isEncargado && (
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 20px 24px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)" }}>
+            <button
+              onClick={handleResolverError}
+              disabled={saving}
+              style={{ width: "100%", padding: "15px", borderRadius: "12px", border: "none", background: saving ? "#e2e8f0" : "#0f172a", color: saving ? "#94a3b8" : "#fff", fontWeight: 700, fontSize: "0.95rem", cursor: saving ? "not-allowed" : "pointer", boxShadow: saving ? "none" : "0 2px 8px rgba(15,23,42,0.18)" }}
+            >
+              {saving ? "Procesando…" : "🔄 Devolver a preparación"}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+  // ── Fin vista ERROR_CONFIRMADO R8 ─────────────────────────────────────────
 
   // ── Vista PREPARADO/CONTROLADO — VENTAS (detalle completo + despacho) ──────
   // ISABELA despacha desde PREPARADO; R8 despacha desde CONTROLADO.
