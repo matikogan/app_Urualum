@@ -273,13 +273,14 @@ service cloud.firestore {
                          'cancelMotivo', 'canceladoPor', 'canceladoAt']);
       }
 
-      // Ventas puede cancelar pedidos que NO estén despachados
+      // Ventas puede cancelar pedidos que NO estén ya despachados/entregados/cancelados
       function canVentasCancel() {
         return isVentas()
           && request.resource.data.estado == "CANCELADO"
-          && resource.data.estado != "DESPACHADO"
+          && !(resource.data.estado in ["DESPACHADO", "ENTREGADO", "CANCELADO", "ANULADO"])
           && request.resource.data.diff(resource.data).changedKeys()
-               .hasOnly(['estado', 'cancelMotivo', 'canceladoPor', 'canceladoAt', 'updatedAt', 'timestamps']);
+               .hasOnly(['estado', 'cancelMotivo', 'canceladoPor', 'canceladoPorNombre',
+                         'canceladoAt', 'canceladoDesdeEstado', 'updatedAt', 'timestamps']);
       }
 
       // **ÚNICO bloque operativo permitido**

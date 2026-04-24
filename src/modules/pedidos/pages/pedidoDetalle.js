@@ -664,11 +664,23 @@ export default function PedidoDetalle() {
     if (!motivo) return;
     setCanceling(true);
     try {
-      await cancelarPedido(pedido.id, motivo, user?.uid);
+      await updateDoc(doc(db, "pedidos", id), {
+        estado: "CANCELADO",
+        cancelMotivo: motivo,
+        canceladoPor: user?.uid || null,
+        canceladoPorNombre: profile?.nombre || user?.displayName || user?.email || null,
+        canceladoAt: serverTimestamp(),
+        canceladoDesdeEstado: pedido?.estado || null,
+        updatedAt: serverTimestamp(),
+        [`timestamps.CANCELADO`]: serverTimestamp(),
+      });
+      haptics?.success?.();
       toast.success("Pedido cancelado");
-      navigate("/pedidos");
+      setShowCancelModal(false);
+      navigate("/ventas/pipeline");
     } catch (e) {
-      toast.error("No se pudo cancelar: " + e.message);
+      console.error(e);
+      toast.error("No se pudo cancelar: " + (e?.message || "Error desconocido"));
     } finally {
       setCanceling(false);
     }
@@ -1004,6 +1016,229 @@ const filteredOperarios = useMemo(() => {
   if (!pedido) return <p className="p-3">Cargando…</p>;
 
   const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
+
+  // ── Helpers de cancelación (ventas) ──────────────────────────────────────
+  // Se llaman desde cualquier early-return que ventas pueda ver
+  const ESTADOS_NO_CANCELABLES = ["CANCELADO", "ANULADO", "ENTREGADO", "DESPACHADO"];
+  const puedeVentasCancelar = isVentas && !ESTADOS_NO_CANCELABLES.includes(pedido?.estado);
+
+  function abrirCancelModal() {
+    setCancelStep(1);
+    setCancelMotivo("");
+    setCancelOtroText("");
+    setShowCancelModal(true);
+  }
+
+  // Botón trigger pequeño — va en headers
+  function renderVentasCancelBtn() {
+    if (!puedeVentasCancelar) return null;
+    return (
+      <button
+        type="button"
+        onClick={abrirCancelModal}
+        style={{
+          fontSize: "0.72rem", fontWeight: 600,
+          color: "#dc2626", background: "none",
+          border: "1.5px solid #fca5a5", borderRadius: "7px",
+          padding: "5px 11px", cursor: "pointer",
+          display: "flex", alignItems: "center", gap: "4px",
+          flexShrink: 0, whiteSpace: "nowrap",
+          transition: "all 0.12s ease",
+        }}
+      >
+        ✕ Cancelar pedido
+      </button>
+    );
+  }
+
+  // Modal de cancelación 2 pasos
+  function renderCancelModal() {
+    if (!showCancelModal || !isVentas) return null;
+
+    const MOTIVOS = [
+      "El cliente se arrepintió",
+      "Producto sin stock",
+      "Error en el pedido",
+      "Pedido duplicado",
+      "Cliente no disponible",
+      "Otro",
+    ];
+    const motivoFinal = cancelMotivo === "Otro" ? cancelOtroText.trim() : cancelMotivo;
+    const estadoLabel = {
+      PENDIENTE_ASIGNAR: "Pendiente de asignar",
+      ASIGNADO: "Asignado a operario",
+      EN_PREPARACION: "En preparación",
+      PREPARADO: "Preparado",
+      CONTROLADO: "Controlado",
+      CON_ERROR: "Con error",
+      ERROR_CONFIRMADO: "Error confirmado",
+    };
+
+    return (
+      <div
+        onClick={() => setShowCancelModal(false)}
+        style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          background: "rgba(0,0,0,0.55)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "20px",
+        }}
+      >
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            background: "#fff", borderRadius: "20px",
+            padding: "28px 24px", width: "100%", maxWidth: "480px",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.22)",
+          }}
+        >
+          {/* Cabecera modal */}
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "20px" }}>
+            <div>
+              <p style={{ margin: 0, fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                {cancelStep === 1 ? "Cancelar pedido" : "Confirmar cancelación"}
+              </p>
+              <h2 style={{ margin: "3px 0 0", fontSize: "1.1rem", fontWeight: 800, color: "#0f172a" }}>
+                #{pedido?.numero || id} — {pedido?.cliente || "—"}
+              </h2>
+              {pedido?.estado && (
+                <span style={{ display: "inline-block", marginTop: "5px", fontSize: "0.7rem", fontWeight: 700, padding: "3px 9px", borderRadius: "999px", background: "#f1f5f9", color: "#64748b" }}>
+                  Estado actual: {estadoLabel[pedido.estado] || pedido.estado}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => setShowCancelModal(false)}
+              style={{ background: "none", border: "none", fontSize: "1.3rem", color: "#94a3b8", cursor: "pointer", lineHeight: 1, padding: "0 0 0 12px", flexShrink: 0 }}
+            >×</button>
+          </div>
+
+          {cancelStep === 1 ? (
+            /* ── Paso 1: elegir motivo ── */
+            <>
+              <p style={{ margin: "0 0 14px", fontSize: "0.78rem", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Motivo de cancelación *
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginBottom: "16px" }}>
+                {MOTIVOS.map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setCancelMotivo(m)}
+                    style={{
+                      width: "100%", textAlign: "left", padding: "11px 14px",
+                      borderRadius: "10px", cursor: "pointer", fontFamily: "inherit",
+                      border: cancelMotivo === m ? "2px solid #dc2626" : "1.5px solid #e2e8f0",
+                      background: cancelMotivo === m ? "#fef2f2" : "#f8fafc",
+                      color: cancelMotivo === m ? "#dc2626" : "#334155",
+                      fontSize: "0.88rem", fontWeight: cancelMotivo === m ? 700 : 500,
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      transition: "all 0.1s ease",
+                    }}
+                  >
+                    {m}
+                    {cancelMotivo === m && <span style={{ fontSize: "0.9rem", flexShrink: 0 }}>✓</span>}
+                  </button>
+                ))}
+              </div>
+              {cancelMotivo === "Otro" && (
+                <textarea
+                  value={cancelOtroText}
+                  onChange={e => setCancelOtroText(e.target.value)}
+                  placeholder="Describí el motivo…"
+                  autoFocus
+                  style={{
+                    width: "100%", boxSizing: "border-box",
+                    padding: "10px 12px", border: "1.5px solid #e2e8f0",
+                    borderRadius: "10px", fontSize: "0.9rem",
+                    resize: "none", minHeight: "70px",
+                    marginBottom: "14px", fontFamily: "inherit",
+                  }}
+                />
+              )}
+              <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+                <button
+                  type="button"
+                  onClick={() => setShowCancelModal(false)}
+                  style={{ flex: 1, padding: "12px", borderRadius: "10px", border: "1.5px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontWeight: 600, cursor: "pointer", fontSize: "0.88rem" }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={!cancelMotivo || (cancelMotivo === "Otro" && !cancelOtroText.trim())}
+                  onClick={() => setCancelStep(2)}
+                  style={{
+                    flex: 2, padding: "12px", borderRadius: "10px", border: "none",
+                    background: (cancelMotivo && (cancelMotivo !== "Otro" || cancelOtroText.trim())) ? "#dc2626" : "#e2e8f0",
+                    color: (cancelMotivo && (cancelMotivo !== "Otro" || cancelOtroText.trim())) ? "#fff" : "#94a3b8",
+                    fontWeight: 700, cursor: "pointer", fontSize: "0.88rem",
+                    transition: "all 0.1s ease",
+                  }}
+                >
+                  Continuar →
+                </button>
+              </div>
+            </>
+          ) : (
+            /* ── Paso 2: confirmar ── */
+            <>
+              {/* Resumen del motivo */}
+              <div style={{ background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px", marginBottom: "16px" }}>
+                <p style={{ margin: "0 0 4px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>Motivo seleccionado</p>
+                <p style={{ margin: 0, fontSize: "0.95rem", fontWeight: 700, color: "#0f172a" }}>{motivoFinal}</p>
+              </div>
+
+              {/* Warning */}
+              <div style={{ background: "#fef2f2", border: "1.5px solid #fca5a5", borderRadius: "12px", padding: "14px 16px", marginBottom: "20px", display: "flex", gap: "10px", alignItems: "flex-start" }}>
+                <span style={{ fontSize: "1.1rem", flexShrink: 0, lineHeight: 1.4 }}>⚠️</span>
+                <div>
+                  <p style={{ margin: "0 0 3px", fontSize: "0.82rem", fontWeight: 700, color: "#dc2626" }}>
+                    Esta acción no se puede deshacer fácilmente
+                  </p>
+                  <p style={{ margin: 0, fontSize: "0.78rem", color: "#9a1a1a", lineHeight: 1.5 }}>
+                    El pedido quedará cancelado. Si fue un error, solo un <strong>administrador</strong> podrá reactivarlo.
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button
+                  type="button"
+                  onClick={() => setCancelStep(1)}
+                  style={{ flex: 1, padding: "13px", borderRadius: "10px", border: "1.5px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontWeight: 600, cursor: "pointer", fontSize: "0.88rem" }}
+                >
+                  ← Volver
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelar}
+                  disabled={canceling}
+                  style={{
+                    flex: 2, padding: "13px", borderRadius: "10px", border: "none",
+                    background: canceling ? "#e2e8f0" : "#dc2626",
+                    color: canceling ? "#94a3b8" : "#fff",
+                    fontWeight: 700, cursor: canceling ? "not-allowed" : "pointer",
+                    fontSize: "0.88rem", boxShadow: canceling ? "none" : "0 2px 10px rgba(220,38,38,0.28)",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+                    transition: "all 0.1s ease",
+                  }}
+                >
+                  {canceling ? (
+                    <>
+                      <span style={{ width: "14px", height: "14px", borderRadius: "50%", border: "2px solid #94a3b8", borderTopColor: "transparent", display: "inline-block" }} />
+                      Cancelando…
+                    </>
+                  ) : "✕ Confirmar cancelación"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+  // ── Fin helpers de cancelación ────────────────────────────────────────────
 
   // ── Vista especial PENDIENTE_ASIGNAR para encargado ──────────────────────
   if (pedido.estado === ESTADOS.PENDIENTE_ASIGNAR) {
@@ -2696,7 +2931,20 @@ const filteredOperarios = useMemo(() => {
               </p>
             </div>
           )}
+
+          {/* ── Cancelar pedido (ventas) ── */}
+          {puedeVentasCancelar && (
+            <button
+              type="button"
+              onClick={abrirCancelModal}
+              style={{ marginTop: "4px", width: "100%", padding: "11px", borderRadius: "10px", border: "1.5px solid #fca5a5", background: "#fef2f2", color: "#dc2626", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer" }}
+            >
+              ✕ Cancelar pedido
+            </button>
+          )}
         </div>
+
+        {renderCancelModal()}
       </div>
     );
   }
@@ -2849,6 +3097,8 @@ const filteredOperarios = useMemo(() => {
             </button>
           </div>
         )}
+
+        {renderCancelModal()}
       </div>
     );
   }
@@ -2950,6 +3200,7 @@ const filteredOperarios = useMemo(() => {
               {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🚚 {pedido.metodoEntrega}</span>}
               {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🏭 {pedido.deposito}</span>}
               <span style={{ background: "#ede9fe", color: "#5b21b6", fontSize: "0.68rem", fontWeight: 700, padding: "3px 10px", borderRadius: "999px", letterSpacing: "0.05em" }}>LISTO P/ DESPACHO</span>
+              {renderVentasCancelBtn()}
             </div>
           </div>
         </div>
@@ -3092,10 +3343,10 @@ const filteredOperarios = useMemo(() => {
             </div>
 
             {/* Cancelar pedido */}
-            {isVentas && pedido.estado !== "DESPACHADO" && (
+            {puedeVentasCancelar && (
               <button
                 type="button"
-                onClick={() => { setShowCancelModal(true); setCancelStep(1); setCancelMotivo(""); setCancelOtroText(""); }}
+                onClick={abrirCancelModal}
                 style={{
                   width: "100%", padding: "10px", borderRadius: "10px",
                   border: "1.5px solid #fca5a5", background: "#fef2f2",
@@ -3103,143 +3354,14 @@ const filteredOperarios = useMemo(() => {
                   cursor: "pointer",
                 }}
               >
-                Cancelar pedido
+                ✕ Cancelar pedido
               </button>
             )}
           </div>
 
         </div>{/* fin grid */}
 
-        {/* ── Modal: Cancelar pedido ── */}
-        {showCancelModal && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-            <div style={{ background: "#fff", borderRadius: "20px", padding: "24px", width: "100%", maxWidth: "460px", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-                <h2 style={{ margin: 0, fontWeight: 800, fontSize: "1.05rem", color: "#0f172a" }}>
-                  Cancelar pedido #{pedido.numero || id}
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setShowCancelModal(false)}
-                  style={{ background: "none", border: "none", fontSize: "1.2rem", color: "#94a3b8", cursor: "pointer" }}
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Advertencia */}
-              <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "10px 14px", marginBottom: "16px", display: "flex", gap: "8px", alignItems: "center" }}>
-                <span style={{ fontSize: "1rem", flexShrink: 0 }}>⚠️</span>
-                <p style={{ margin: 0, fontSize: "0.82rem", color: "#dc2626", fontWeight: 600 }}>
-                  Esta acción no se puede deshacer
-                </p>
-              </div>
-
-              {cancelStep === 1 ? (
-                <>
-                  <p style={{ margin: "0 0 12px", fontSize: "0.78rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                    Motivo de cancelación
-                  </p>
-
-                  {/* Chips de motivo */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
-                    {["El cliente se arrepintió", "Producto sin stock", "Error en el pedido", "Cliente no disponible", "Otro"].map(m => (
-                      <button
-                        key={m} type="button"
-                        onClick={() => setCancelMotivo(m)}
-                        style={{
-                          width: "100%", textAlign: "left", padding: "10px 14px",
-                          borderRadius: "10px", cursor: "pointer", fontFamily: "inherit",
-                          border: cancelMotivo === m ? "2px solid #dc2626" : "1.5px solid #e2e8f0",
-                          background: cancelMotivo === m ? "#fef2f2" : "#f8fafc",
-                          color: cancelMotivo === m ? "#dc2626" : "#334155",
-                          fontSize: "0.88rem", fontWeight: cancelMotivo === m ? 700 : 500,
-                          display: "flex", alignItems: "center", justifyContent: "space-between",
-                        }}
-                      >
-                        {m}
-                        {cancelMotivo === m && <span style={{ fontSize: "0.9rem" }}>✓</span>}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Input para "Otro" */}
-                  {cancelMotivo === "Otro" && (
-                    <input
-                      type="text"
-                      value={cancelOtroText}
-                      onChange={e => setCancelOtroText(e.target.value)}
-                      placeholder="Describí el motivo…"
-                      style={{
-                        width: "100%", boxSizing: "border-box",
-                        padding: "10px 12px", border: "1.5px solid #e2e8f0",
-                        borderRadius: "10px", fontSize: "0.9rem",
-                        marginBottom: "12px",
-                      }}
-                    />
-                  )}
-
-                  <div style={{ display: "flex", gap: "10px" }}>
-                    <button
-                      type="button"
-                      onClick={() => setShowCancelModal(false)}
-                      style={{ flex: 1, padding: "11px", borderRadius: "10px", border: "1.5px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontWeight: 600, cursor: "pointer" }}
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!cancelMotivo || (cancelMotivo === "Otro" && !cancelOtroText.trim())}
-                      onClick={() => setCancelStep(2)}
-                      style={{
-                        flex: 2, padding: "11px", borderRadius: "10px", border: "none",
-                        background: cancelMotivo && (cancelMotivo !== "Otro" || cancelOtroText.trim()) ? "#dc2626" : "#e2e8f0",
-                        color: cancelMotivo && (cancelMotivo !== "Otro" || cancelOtroText.trim()) ? "#fff" : "#94a3b8",
-                        fontWeight: 700, cursor: "pointer",
-                      }}
-                    >
-                      Continuar →
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div style={{ background: "#f8fafc", borderRadius: "12px", padding: "14px", marginBottom: "16px" }}>
-                    <p style={{ margin: "0 0 4px", fontSize: "0.72rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase" }}>Motivo seleccionado</p>
-                    <p style={{ margin: 0, fontSize: "0.92rem", fontWeight: 700, color: "#0f172a" }}>
-                      {cancelMotivo === "Otro" ? cancelOtroText.trim() : cancelMotivo}
-                    </p>
-                  </div>
-                  <p style={{ margin: "0 0 16px", fontSize: "0.9rem", color: "#334155", lineHeight: 1.5 }}>
-                    ¿Estás seguro? Esta acción cancelará el pedido definitivamente y no se puede revertir.
-                  </p>
-                  <div style={{ display: "flex", gap: "10px" }}>
-                    <button
-                      type="button"
-                      onClick={() => setCancelStep(1)}
-                      style={{ flex: 1, padding: "11px", borderRadius: "10px", border: "1.5px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontWeight: 600, cursor: "pointer" }}
-                    >
-                      ← Volver
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCancelar}
-                      disabled={canceling}
-                      style={{
-                        flex: 2, padding: "11px", borderRadius: "10px", border: "none",
-                        background: "#dc2626", color: "#fff",
-                        fontWeight: 700, cursor: canceling ? "not-allowed" : "pointer",
-                        opacity: canceling ? 0.7 : 1,
-                      }}
-                    >
-                      {canceling ? "Cancelando…" : "Confirmar cancelación"}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
+        {renderCancelModal()}
       </div>
     );
   }
@@ -3620,6 +3742,139 @@ const filteredOperarios = useMemo(() => {
     );
   }
   // ── Fin vista CANCELADO ───────────────────────────────────────────────────
+
+  // ── Vista general ventas — estados sin vista dedicada (PENDIENTE, ASIGNADO, EN_PREP) ──
+  if (isVentas) {
+    const formatFecha = (f) => {
+      if (!f) return "—";
+      const d = new Date(f);
+      if (!isNaN(d)) return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
+      return f;
+    };
+    const ESTADO_INFO = {
+      PENDIENTE_ASIGNAR: { label: "Pendiente de asignar",   color: "#94a3b8", bg: "#f8fafc",  border: "#e2e8f0",  icon: "⏳", msg: "El pedido aún no fue asignado a un operario." },
+      ASIGNADO:          { label: "Asignado a operario",    color: "#1e40af", bg: "#eff6ff",  border: "#bfdbfe",  icon: "👤", msg: `Asignado a ${pedido.operarioNombre || "operario"}. Esperando inicio de preparación.` },
+      EN_PREPARACION:    { label: "En preparación",         color: "#854d0e", bg: "#fefce8",  border: "#fde047",  icon: "🔧", msg: `${pedido.operarioNombre || "El operario"} está preparando el pedido ahora.` },
+      CON_ERROR:         { label: "Con error · revisando",  color: "#c2410c", bg: "#fff7ed",  border: "#fed7aa",  icon: "⚠️", msg: "El encargado está revisando un problema antes de escalar." },
+    };
+    const info = ESTADO_INFO[pedido.estado] || { label: pedido.estado, color: "#64748b", bg: "#f8fafc", border: "#e2e8f0", icon: "📋", msg: "" };
+
+    return (
+      <div style={{ background: "#f1f5f9", minHeight: "100vh" }}>
+
+        {/* Header sticky desktop */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 24px", position: "sticky", top: 0, zIndex: 10 }}>
+          <div style={{ maxWidth: "900px", margin: "0 auto", display: "flex", alignItems: "center", gap: "14px" }}>
+            <button type="button" onClick={() => navigate("/ventas/pipeline")}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "34px", height: "34px", flexShrink: 0, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem" }}>
+              ←
+            </button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                Pedido #{pedido.numero || id}
+              </p>
+              <h1 style={{ margin: "1px 0 0", fontSize: "1.1rem", fontWeight: 800, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {pedido.cliente || "—"}
+              </h1>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexShrink: 0 }}>
+              {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
+              {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🚚 {pedido.metodoEntrega}</span>}
+              {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🏭 {pedido.deposito}</span>}
+              {renderVentasCancelBtn()}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ maxWidth: "900px", margin: "0 auto", padding: "24px", display: "grid", gridTemplateColumns: "1fr 280px", gap: "20px", alignItems: "start" }}>
+
+          {/* Columna principal */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+
+            {/* Banner de estado */}
+            <div style={{ background: info.bg, border: `1.5px solid ${info.border}`, borderRadius: "14px", padding: "16px 20px", display: "flex", alignItems: "center", gap: "14px" }}>
+              <span style={{ fontSize: "1.5rem", flexShrink: 0 }}>{info.icon}</span>
+              <div>
+                <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: info.color }}>{info.label}</p>
+                {info.msg && <p style={{ margin: "3px 0 0", fontSize: "0.8rem", color: info.color, opacity: 0.8 }}>{info.msg}</p>}
+              </div>
+            </div>
+
+            {/* Productos */}
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", overflow: "hidden" }}>
+              <div style={{ padding: "12px 16px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Contenido · {productos.length} producto{productos.length !== 1 ? "s" : ""}</span>
+              </div>
+              {productos.length === 0 ? (
+                <p style={{ margin: 0, padding: "16px", color: "#94a3b8", fontSize: "0.85rem" }}>Sin productos registrados.</p>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.88rem" }}>
+                  <tbody>
+                    {productos.map((it, i) => {
+                      const raw = it.cod || it.descripcion || it.desc || "";
+                      const uru = toURUCode(raw);
+                      const nombre = it.descripcion || it.desc || it.nombre || catalogoMap?.[uru]?.customerNo || uru || "—";
+                      const color  = catalogoMap?.[uru]?.finish || catalogoMap?.[uru]?.color || "";
+                      const qty    = it.cant ?? it.cantidad ?? it.qty ?? 0;
+                      return (
+                        <tr key={i} style={{ borderBottom: i < productos.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                          <td style={{ padding: "10px 16px", verticalAlign: "middle" }}>
+                            <p style={{ margin: 0, fontWeight: 500, color: "#1e293b" }}>{nombre}</p>
+                            {color && <p style={{ margin: "2px 0 0", fontSize: "0.72rem", color: "#94a3b8" }}>{color}</p>}
+                          </td>
+                          <td style={{ padding: "10px 16px", textAlign: "right", verticalAlign: "middle" }}>
+                            <span style={{ background: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: "0.85rem", padding: "3px 10px", borderRadius: "8px" }}>×{qty}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {/* Aside */}
+          <div style={{ position: "sticky", top: "76px", display: "flex", flexDirection: "column", gap: "12px" }}>
+            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 18px" }}>
+              <p style={{ margin: "0 0 10px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Resumen</p>
+              {[
+                { label: "Pedido",    value: `#${pedido.numero || id}` },
+                { label: "Cliente",   value: pedido.cliente || "—" },
+                { label: "Método",    value: pedido.metodoEntrega || "—" },
+                { label: "Depósito",  value: pedido.deposito || "—" },
+                { label: "Operario",  value: pedido.operarioNombre || "—" },
+                { label: "F. pedido", value: formatFecha(pedido.finFecha) },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f1f5f9", gap: "8px" }}>
+                  <span style={{ fontSize: "0.78rem", color: "#94a3b8", fontWeight: 500, flexShrink: 0 }}>{label}</span>
+                  <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#0f172a", textAlign: "right" }}>{value}</span>
+                </div>
+              ))}
+            </div>
+            {/* Cancel CTA en el aside */}
+            {puedeVentasCancelar && (
+              <button
+                type="button"
+                onClick={abrirCancelModal}
+                style={{
+                  width: "100%", padding: "11px", borderRadius: "10px",
+                  border: "1.5px solid #fca5a5", background: "#fef2f2",
+                  color: "#dc2626", fontSize: "0.85rem", fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                ✕ Cancelar pedido
+              </button>
+            )}
+          </div>
+        </div>
+
+        {renderCancelModal()}
+      </div>
+    );
+  }
+  // ── Fin vista general ventas ──────────────────────────────────────────────
 
   return (
     <div className="p-3 space-y-4">
