@@ -1241,7 +1241,7 @@ const filteredOperarios = useMemo(() => {
   // ── Fin helpers de cancelación ────────────────────────────────────────────
 
   // ── Vista especial PENDIENTE_ASIGNAR para encargado ──────────────────────
-  if (pedido.estado === ESTADOS.PENDIENTE_ASIGNAR) {
+  if (pedido.estado === ESTADOS.PENDIENTE_ASIGNAR && !isVentas) {
     const { operario: prodsOperario, encargado: prodsEncargado } = splitPorCategoria(productos, catalogoMap);
     const catalogoListo = Object.keys(catalogoMap).length > 0;
 
@@ -1787,7 +1787,7 @@ const filteredOperarios = useMemo(() => {
   // ── Fin vista ASIGNADO encargado ─────────────────────────────────────────
 
   // ── Vista ASIGNADO — OPERARIO (mobile-first) ──────────────────────────────
-  if (pedido.estado === ESTADOS.ASIGNADO && (!isEncargado || isSelfAssigned)) {
+  if (pedido.estado === ESTADOS.ASIGNADO && (!isEncargado || isSelfAssigned) && !isVentas) {
     const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
 
     const formatFecha = (f) => {
@@ -2198,7 +2198,7 @@ const filteredOperarios = useMemo(() => {
   // ── Fin vista EN_PREPARACION encargado ───────────────────────────────────
 
   // ── Vista EN_PREPARACION — OPERARIO (mobile-first, usa EncPreparacionPanel) ──
-  if (pedido.estado === ESTADOS.EN_PREPARACION && (!isEncargado || isSelfAssigned)) {
+  if (pedido.estado === ESTADOS.EN_PREPARACION && (!isEncargado || isSelfAssigned) && !isVentas) {
     const productos = Array.isArray(pedido.productos) ? pedido.productos : [];
 
     const formatFecha = (f) => {
