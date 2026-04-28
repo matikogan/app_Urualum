@@ -33,6 +33,7 @@ import PedidoDetalleOperario from "modules/pedidos/components/PedidoDetalleOpera
 import PedidosControladosVentas from "./modules/pedidos/pages/PedidosControladosVentas";
 import PedidoDetalleVentas from "./modules/pedidos/pages/PedidoDetalleVentas";
 import DespachadosHistorico from "./modules/pedidos/pages/DespachadosHistorico";
+import EntregadosHistorico from "./modules/pedidos/pages/EntregadosHistorico";
 import PipelineVentas from "./modules/pedidos/pages/PipelineVentas";
 
 // Errores (Encargado)
@@ -170,6 +171,7 @@ export default function App() {
               <Route path="/ventas/pedidos-web" element={<PedidosWeb />} />
               <Route path="/ventas/despachar/:id" element={<ConfirmarDespachoWrapper />} />
               <Route path="/ventas/despachados" element={<DespachadosHistorico />} />
+              <Route path="/ventas/entregados" element={<EntregadosHistorico />} />
               <Route path="/ventas/pipeline" element={<PipelineVentas />} />
             </Route>
 

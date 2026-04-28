@@ -442,11 +442,15 @@ export default function PipelineVentas() {
     return () => { unsubIsabela(); unsubR8(); };
   }, []);
 
-  // ── Listener pedidos_entregados (todos los depósitos) ──
+  // ── Listener pedidos_entregados — solo HOY para el pipeline ──
+  // El histórico completo está en /ventas/entregados
   useEffect(() => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
     const q = query(
       collection(db, "pedidos_entregados"),
-      limit(500)
+      where("entregadoAt", ">=", hoy),
+      limit(300)
     );
     const unsub = onSnapshot(q,
       snap => setEntregadosAll(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
@@ -783,7 +787,7 @@ export default function PipelineVentas() {
           )}
         </button>
 
-        {/* Link al histórico */}
+        {/* Link al histórico de despachos */}
         <a
           href="/ventas/despachados"
           title="Histórico de despachos"
@@ -796,6 +800,25 @@ export default function PipelineVentas() {
           }}
         >
           📋
+        </a>
+
+        {/* Link al histórico de entregados */}
+        <a
+          href="/ventas/entregados"
+          title="Histórico de pedidos entregados"
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            gap: "5px",
+            height: "32px",
+            padding: "0 11px",
+            background: "#f0fdf4", border: "1px solid #bbf7d0",
+            borderRadius: "8px", textDecoration: "none",
+            fontSize: "0.74rem", fontWeight: 700,
+            color: "#15803d", flexShrink: 0,
+            whiteSpace: "nowrap",
+          }}
+        >
+          📦 Entregados
         </a>
       </div>
 
