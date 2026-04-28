@@ -129,7 +129,8 @@ export default function EntregadosHistorico() {
         if (
           p.productos?.some(
             (pr) =>
-              norm(pr.nombre || pr.descripcion || "").includes(nq) ||
+              // Finnegans guarda la descripción en "desc" y el código en "cod"
+              norm(pr.desc || pr.nombre || pr.descripcion || "").includes(nq) ||
               norm(pr.cod || pr.codUru || pr.codigo || "").includes(nq)
           )
         )
@@ -382,7 +383,7 @@ export default function EntregadosHistorico() {
                 ? prods.filter((pr) => {
                     const nq = norm(debouncedQ);
                     return (
-                      norm(pr.nombre || pr.descripcion || "").includes(nq) ||
+                      norm(pr.desc || pr.nombre || pr.descripcion || "").includes(nq) ||
                       norm(pr.cod || pr.codUru || pr.codigo || "").includes(nq)
                     );
                   })
@@ -450,7 +451,12 @@ export default function EntregadosHistorico() {
                         cursor: "default",
                       }}
                       title={prods
-                        .map((pr) => `• ${pr.nombre || pr.descripcion || pr.cod || "?"}`)
+                        .map((pr) => {
+                          const nombre = (pr.desc || pr.nombre || pr.descripcion || "")
+                            .replace(/^\d+\s*/, "").trim() || pr.cod || "?";
+                          const cant = pr.cant ?? pr.cantidad;
+                          return `• ${nombre}${cant != null ? ` × ${cant}` : ""}`;
+                        })
                         .join("\n")}
                     >
                       {prods.length} ítem{prods.length !== 1 ? "s" : ""}
@@ -547,12 +553,14 @@ export default function EntregadosHistorico() {
                                     {pr.cod || pr.codUru || pr.codigo}
                                   </span>
                                 )}
-                                {/* Nombre */}
+                                {/* Nombre — Finnegans lo guarda en "desc" */}
                                 <span style={{ flex: 1, color: "#1e293b", fontWeight: 500 }}>
-                                  {pr.nombre || pr.descripcion || "Sin nombre"}
+                                  {/* desc contiene "CODIGO Nombre producto" — mostramos sin el código al inicio */}
+                                  {(pr.desc || pr.nombre || pr.descripcion || "Sin nombre")
+                                    .replace(/^\d+\s*/, "").trim() || pr.desc || "Sin nombre"}
                                 </span>
-                                {/* Cantidad */}
-                                {(pr.cantidad !== undefined) && (
+                                {/* Cantidad — Finnegans lo guarda en "cant" */}
+                                {(pr.cant ?? pr.cantidad) !== undefined && (pr.cant ?? pr.cantidad) !== null && (
                                   <span style={{
                                     fontSize: "0.78rem", color: "#64748b",
                                     background: "#f8fafc",
@@ -560,7 +568,7 @@ export default function EntregadosHistorico() {
                                     borderRadius: "6px",
                                     flexShrink: 0,
                                   }}>
-                                    × {pr.cantidad}
+                                    × {pr.cant ?? pr.cantidad}
                                   </span>
                                 )}
                               </div>
