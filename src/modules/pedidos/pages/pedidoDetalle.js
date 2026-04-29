@@ -19,6 +19,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { despacharPedido } from "../services/despachoFS";
 
 import ConfirmarDespacho from "./confirmarDespacho";
+import PagoModal, { resumenPago } from "../components/PagoModal";
 
 
 
@@ -587,6 +588,11 @@ export default function PedidoDetalle() {
   const [showAnularModal, setShowAnularModal] = useState(false);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const [savingAnulacion, setSavingAnulacion] = useState(false);
+
+  // Estado para el modal de pago (ventas)
+  const [showPagoModal, setShowPagoModal] = useState(false);
+  // El pedido local se actualiza optimísticamente tras guardar el pago
+  const [pagoLocal, setPagoLocal] = useState(null); // null = usar pedido.pago
 
   // Estados para el modal de cancelación (ventas)
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -3396,6 +3402,10 @@ const filteredOperarios = useMemo(() => {
     if (isVentas) {
       // ── Desktop-first para ventas ──────────────────────────────────────────
       const operarioNombre = pedido.operarioNombre || "—";
+      const pagoActual     = pedido.pago || null;
+      const pagoHistorial  = pedido.pagoHistorial || [];
+      const coleccionPago  = pedido._source === "entregados" ? "pedidos_entregados" : "pedidos_despachados";
+
       return (
         <div style={{ background: "#f1f5f9", minHeight: "100vh" }}>
           {/* Header sticky */}
@@ -3483,6 +3493,52 @@ const filteredOperarios = useMemo(() => {
                 <p style={{ margin: "0 0 4px", fontSize: "0.85rem", color: "#064e3b" }}><strong>Fecha:</strong> {formatFechaHora(pedido.entregadoAt)}</p>
                 {pedido.agencia && <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "#064e3b" }}><strong>Agencia:</strong> {pedido.agencia}</p>}
               </div>
+
+              {/* ── Card de pago ── */}
+              {(() => {
+                const pago = pagoLocal ?? pagoActual;
+                const resumen = resumenPago(pago);
+                return (
+                  <div style={{
+                    background: pago ? "#f0fdf4" : "#fffbeb",
+                    border: `1.5px solid ${pago ? "#86efac" : "#fde68a"}`,
+                    borderRadius: "14px",
+                    padding: "16px 18px",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+                      <p style={{ margin: 0, fontSize: "0.68rem", fontWeight: 700, color: pago ? "#166534" : "#92400e", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                        {pago ? "💰 Pago registrado" : "⚠ Pago pendiente"}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowPagoModal(true)}
+                        style={{
+                          padding: "4px 11px",
+                          borderRadius: "8px",
+                          border: `1.5px solid ${pago ? "#86efac" : "#fde68a"}`,
+                          background: "#fff",
+                          color: pago ? "#166534" : "#92400e",
+                          fontSize: "0.72rem",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {pago ? "✏️ Editar" : "+ Registrar"}
+                      </button>
+                    </div>
+                    {pago ? (
+                      <p style={{ margin: 0, fontSize: "0.85rem", color: "#064e3b", fontWeight: 500, lineHeight: 1.5 }}>
+                        {resumen}
+                      </p>
+                    ) : (
+                      <p style={{ margin: 0, fontSize: "0.82rem", color: "#92400e" }}>
+                        No se ha registrado el pago de este pedido.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Resumen */}
               <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 18px" }}>
                 <p style={{ margin: "0 0 10px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Resumen</p>
@@ -3503,6 +3559,21 @@ const filteredOperarios = useMemo(() => {
               </div>
             </div>
           </div>
+
+          {/* Modal de pago */}
+          {showPagoModal && (
+            <PagoModal
+              pedidoId={id}
+              coleccion={coleccionPago}
+              pagoActual={pagoLocal ?? pagoActual}
+              historial={pagoHistorial}
+              onClose={() => setShowPagoModal(false)}
+              onSaved={(nuevo) => {
+                setPagoLocal(nuevo);
+                setShowPagoModal(false);
+              }}
+            />
+          )}
         </div>
       );
     }

@@ -10,8 +10,13 @@ service cloud.firestore {
         (isEncargado() && request.resource.data.deposito == userDeposito()) ||
         isAdmin()
       );
-      // Inmutable una vez registrado — correcciones solo por admin
-      allow update: if isAuthed() && isAdmin();
+      // Ventas puede registrar/editar el pago (solo campos pago y pagoHistorial)
+      // Admin puede hacer cualquier corrección
+      allow update: if isAuthed() && (
+        isAdmin() ||
+        (isVentas() && request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(['pago', 'pagoHistorial']))
+      );
       allow delete: if isAuthed() && isAdmin();
     }
 

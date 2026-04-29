@@ -14,6 +14,7 @@ import { db } from "../../../firebase";
 import { useAuth } from "../../../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { norm } from "utils/text";
+import PagoModal, { resumenPago } from "../components/PagoModal";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -53,7 +54,13 @@ export default function EntregadosHistorico() {
   const [searchQ, setSearchQ]         = useState("");
   const [debouncedQ, setDebouncedQ]   = useState("");
   const [filterDep, setFilterDep]     = useState(depositoUsuario || "");
+  const [filterPago, setFilterPago]   = useState(""); // "" | "pendiente" | "registrado"
   const [expandedId, setExpandedId]   = useState(null);
+
+  // Modal de pago
+  const [pagoModalData, setPagoModalData] = useState(null); // { pedidoId, pagoActual, historial }
+  // Actualizaciones optimistas de pago (id → pago)
+  const [pagosLocales, setPagosLocales]   = useState({});
 
   // Rango de fechas — default: últimos 30 días
   const [fechaDesde, setFechaDesde] = useState(() => {
@@ -93,6 +100,11 @@ export default function EntregadosHistorico() {
     return () => clearTimeout(h);
   }, [searchQ]);
 
+  // ── Conteo de pagos pendientes (sobre todos los pedidos cargados) ────────
+  const pagosPendientes = useMemo(() =>
+    pedidos.filter(p => !(pagosLocales[p.id] ?? p.pago)).length
+  , [pedidos, pagosLocales]);
+
   // ── Filtros ─────────────────────────────────────────────────────────────
   const pedidosFiltrados = useMemo(() => {
     let out = pedidos;
@@ -120,6 +132,13 @@ export default function EntregadosHistorico() {
       });
     }
 
+    // Filtro por estado de pago
+    if (filterPago === "pendiente") {
+      out = out.filter(p => !(pagosLocales[p.id] ?? p.pago));
+    } else if (filterPago === "registrado") {
+      out = out.filter(p => !!(pagosLocales[p.id] ?? p.pago));
+    }
+
     // Búsqueda de texto (número, cliente, o cualquier producto)
     if (debouncedQ) {
       const nq = norm(debouncedQ);
@@ -140,7 +159,7 @@ export default function EntregadosHistorico() {
     }
 
     return out;
-  }, [pedidos, filterDep, fechaDesde, fechaHasta, debouncedQ]);
+  }, [pedidos, filterDep, fechaDesde, fechaHasta, debouncedQ, filterPago, pagosLocales]);
 
   const hayFiltros = !!(searchQ || fechaDesde || fechaHasta);
 
@@ -188,10 +207,18 @@ export default function EntregadosHistorico() {
             }}>
               {pedidosFiltrados.length} resultado{pedidosFiltrados.length !== 1 ? "s" : ""}
             </span>
-            {pedidosFiltrados.length !== pedidos.length && (
-              <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>
-                de {pedidos.length} cargados
-              </span>
+            {pagosPendientes > 0 && (
+              <button
+                onClick={() => setFilterPago(f => f === "pendiente" ? "" : "pendiente")}
+                style={{
+                  padding: "3px 10px", borderRadius: "999px", border: "none",
+                  background: filterPago === "pendiente" ? "#f59e0b" : "#fef3c7",
+                  color: filterPago === "pendiente" ? "#fff" : "#92400e",
+                  fontSize: "0.72rem", fontWeight: 700, cursor: "pointer",
+                }}
+              >
+                ⚠ {pagosPendientes} sin pago
+              </button>
             )}
           </div>
         )}
@@ -356,12 +383,12 @@ export default function EntregadosHistorico() {
             {/* Cabecera de tabla */}
             <div style={{
               display: "grid",
-              gridTemplateColumns: "130px 1fr 110px 70px 165px 100px 28px",
+              gridTemplateColumns: "130px 1fr 110px 70px 165px 90px 160px 28px",
               padding: "9px 16px",
               background: "#f8fafc",
               borderBottom: "1px solid #f1f5f9",
             }}>
-              {["# Pedido", "Cliente", "Método", "Ítems", "Entregado el", "Depósito", ""].map((h, i) => (
+              {["# Pedido", "Cliente", "Método", "Ítems", "Entregado el", "Depósito", "Pago", ""].map((h, i) => (
                 <span key={i} style={{
                   fontSize: "0.66rem", fontWeight: 700,
                   color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em",
@@ -377,6 +404,8 @@ export default function EntregadosHistorico() {
               const prods = p.productos || [];
               const isExpanded = expandedId === p.id;
               const isOdd = i % 2 === 0;
+              const pagoFila = pagosLocales[p.id] ?? p.pago ?? null;
+              const resumen  = resumenPago(pagoFila);
 
               // Destacar productos que coinciden con la búsqueda
               const matchedProds = debouncedQ
@@ -395,7 +424,7 @@ export default function EntregadosHistorico() {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "130px 1fr 110px 70px 165px 100px 28px",
+                      gridTemplateColumns: "130px 1fr 110px 70px 165px 90px 160px 28px",
                       padding: "11px 16px",
                       background: isExpanded
                         ? "#f0f9ff"
@@ -480,6 +509,49 @@ export default function EntregadosHistorico() {
                     }}>
                       {p.deposito || "—"}
                     </span>
+
+                    {/* Pago */}
+                    <div onClick={e => e.stopPropagation()}>
+                      {pagoFila ? (
+                        <button
+                          onClick={() => setPagoModalData({ pedidoId: p.id, pagoActual: pagoFila, historial: p.pagoHistorial || [] })}
+                          title={resumen}
+                          style={{
+                            padding: "3px 9px",
+                            borderRadius: "8px",
+                            border: "1px solid #86efac",
+                            background: "#f0fdf4",
+                            color: "#15803d",
+                            fontSize: "0.7rem",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            whiteSpace: "nowrap",
+                            maxWidth: "150px",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          ✓ {resumen?.split(" · ")[0] || "Registrado"}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setPagoModalData({ pedidoId: p.id, pagoActual: null, historial: [] })}
+                          style={{
+                            padding: "3px 9px",
+                            borderRadius: "8px",
+                            border: "1px solid #fde68a",
+                            background: "#fffbeb",
+                            color: "#92400e",
+                            fontSize: "0.7rem",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          + Registrar
+                        </button>
+                      )}
+                    </div>
 
                     {/* Botón expandir productos */}
                     <button
@@ -621,6 +693,21 @@ export default function EntregadosHistorico() {
           </div>
         )}
       </div>
+
+      {/* Modal de pago */}
+      {pagoModalData && (
+        <PagoModal
+          pedidoId={pagoModalData.pedidoId}
+          coleccion="pedidos_entregados"
+          pagoActual={pagoModalData.pagoActual}
+          historial={pagoModalData.historial}
+          onClose={() => setPagoModalData(null)}
+          onSaved={(nuevo) => {
+            setPagosLocales(prev => ({ ...prev, [pagoModalData.pedidoId]: nuevo }));
+            setPagoModalData(null);
+          }}
+        />
+      )}
     </div>
   );
 }
