@@ -299,12 +299,16 @@ export async function upsertPedidoDesdeFinnegans(pedidoInput) {
   const ref = doc(db, "pedidos", canonicalId);
   const prevSnap = await getDoc(ref);
 
-  // Si el pedido no existe en 'pedidos', verificar si ya fue despachado localmente.
-  // Si está en 'pedidos_despachados', no recrearlo — evita que el sync "resucite"
-  // pedidos que ventas ya despachó pero Finnegans todavía muestra como pendientes.
+  // Si el pedido no existe en 'pedidos', verificar si ya fue despachado o entregado
+  // localmente. Si está en 'pedidos_despachados' o 'pedidos_entregados', no recrearlo —
+  // evita que el sync "resucite" pedidos que ya se procesaron pero Finnegans todavía
+  // muestra como pendientes.
   if (!prevSnap.exists()) {
     const despachadoSnap = await getDoc(doc(db, "pedidos_despachados", canonicalId));
     if (despachadoSnap.exists()) return { skipped: true };
+
+    const entregadoSnap = await getDoc(doc(db, "pedidos_entregados", canonicalId));
+    if (entregadoSnap.exists()) return { skipped: true };
   }
 
   const prev = prevSnap.exists() ? prevSnap.data() : {};
@@ -367,8 +371,21 @@ export async function upsertPedidoDesdeFinnegans(pedidoInput) {
           }
         }
 
-        // Volver al inicio del flujo
-        updateDataRaw.estado           = "PENDIENTE_ASIGNAR";
+        // Si ya había un operario asignado, vuelve a EN_PREPARACION con el mismo
+        // responsable (no se pierde la asignación ni se reencola). Si todavía no
+        // se había asignado nadie, vuelve a PENDIENTE_ASIGNAR.
+        const tieneOperario = !!prev.operarioId;
+        if (tieneOperario) {
+          updateDataRaw.estado           = "EN_PREPARACION";
+          updateDataRaw.operarioId       = prev.operarioId;
+          updateDataRaw.operarioNombre   = prev.operarioNombre || null;
+          updateDataRaw.timestamps       = { ...(prev.timestamps || {}), EN_PREPARACION: serverTimestamp() };
+        } else {
+          updateDataRaw.estado           = "PENDIENTE_ASIGNAR";
+          updateDataRaw.operarioId       = null;
+          updateDataRaw.operarioNombre   = null;
+        }
+
         updateDataRaw.itemsPreparados  = itemsPreparados;
         updateDataRaw.modificacionInfo = {
           at:             serverTimestamp(),
@@ -379,13 +396,11 @@ export async function upsertPedidoDesdeFinnegans(pedidoInput) {
           changedItems:   changed,
         };
 
-        // Limpiar estado de preparación anterior
+        // Limpiar estado de preparación anterior (se vuelve a verificar todo el armado)
         updateDataRaw.prepPerfilesOk   = null;
         updateDataRaw.prepAccesoriosOk = null;
         updateDataRaw.bultos           = null;
         updateDataRaw.paquetes         = null;
-        updateDataRaw.operarioId       = null;
-        updateDataRaw.operarioNombre   = null;
       }
     }
   }
@@ -576,6 +591,26 @@ export function listenPedidosAsignadosOperario(operarioId, opts = {}) {
     opts.onError ??
       ((err) => {
         console.error("[listenPedidosAsignadosOperario] onError:", err);
+      })
+  );
+}
+
+// -------------------------------------------------------------
+// LISTEN pedidos despachados pendientes de control/entrega
+// asignados a este operario (vista operario)
+// -------------------------------------------------------------
+export function listenPedidosDespachadosOperario(operarioId, opts = {}) {
+  const col = collection(db, "pedidos_despachados");
+  let qy = query(col, where("operarioId", "==", operarioId));
+  return onSnapshot(
+    qy,
+    opts.onChange ??
+      ((snapshot) => {
+        console.log("[listenPedidosDespachadosOperario] docs:", snapshot.size);
+      }),
+    opts.onError ??
+      ((err) => {
+        console.error("[listenPedidosDespachadosOperario] onError:", err);
       })
   );
   

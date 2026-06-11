@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listenPedidosAsignadosOperario } from "../services/pedidosFS";
+import { listenPedidosAsignadosOperario, listenPedidosDespachadosOperario } from "../services/pedidosFS";
 import { agruparPorEstadoYFecha, ordenarEstados } from "../services/agrupaciones";
 import { useAuth } from "../../../context/AuthContext";
 import { useApp } from "../../../context/AppContext";
 import { Link } from "react-router-dom";
 import useNotificationSound from "hooks/useNotificationSound";
 
-// Estados visibles para operario
-const ESTADOS_VISIBLES = new Set(["ASIGNADO", "EN_PREPARACION"]);
+// Estados visibles para operario (de la colección "pedidos")
+const ESTADOS_VISIBLES = new Set(["ASIGNADO", "EN_PREPARACION", "CON_ERROR"]);
+
+// Pseudo-estado para pedidos despachados (colección "pedidos_despachados")
+// pendientes de control/entrega por este operario
+const ESTADO_DESPACHADO = "DESP_PENDIENTE";
 
 function formatTimeAgo(ts) {
   if (!ts) return null;
@@ -35,8 +39,10 @@ function formatFechaCorta(p) {
 }
 
 const ESTADO_CONFIG = {
-  ASIGNADO:       { label: "Para iniciar",    icon: "🕐", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
-  EN_PREPARACION: { label: "En preparación",  icon: "⚙️", color: "#f59e0b", bg: "#fffbeb", border: "#fde68a" },
+  ASIGNADO:        { label: "Para iniciar",       icon: "🕐", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+  EN_PREPARACION:  { label: "En preparación",     icon: "⚙️", color: "#f59e0b", bg: "#fffbeb", border: "#fde68a" },
+  CON_ERROR:       { label: "Con error",          icon: "🔴", color: "#dc2626", bg: "#fef2f2", border: "#fca5a5" },
+  [ESTADO_DESPACHADO]: { label: "Despachado · controlar", icon: "🚚", color: "#b45309", bg: "#fffbeb", border: "#fde68a" },
 };
 
 const METODO_COLORS = {
@@ -49,11 +55,15 @@ const METODO_COLORS = {
 export default function PedidosAsignadosOperario() {
   const { user, profile } = useAuth();
   const { toast } = useApp();
-  const [pedidos, setPedidos] = useState([]);
+  const [pedidosActivos, setPedidosActivos] = useState([]);
+  const [pedidosDespacho, setPedidosDespacho] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingDespacho, setLoadingDespacho] = useState(true);
   const [badges, setBadges] = useState({});
   const prevAllIdsRef = useRef(new Set());
   const firstSnapRef = useRef(true);
+  const prevDespIdsRef = useRef(new Set());
+  const firstDespSnapRef = useRef(true);
 
   const { soundOn, playNotif } = useNotificationSound("/sfx/new-order.mp3");
 
@@ -64,12 +74,12 @@ export default function PedidosAsignadosOperario() {
       onChange: (snap) => {
         const arr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         const filtrados = arr.filter(p => ESTADOS_VISIBLES.has(String(p.estado || "").toUpperCase()));
-        // EN_PREPARACION primero, luego ASIGNADO
+        // EN_PREPARACION primero, luego ASIGNADO, luego CON_ERROR
         filtrados.sort((a, b) => {
-          const order = { EN_PREPARACION: 0, ASIGNADO: 1 };
+          const order = { EN_PREPARACION: 0, ASIGNADO: 1, CON_ERROR: 2 };
           return (order[a.estado] ?? 9) - (order[b.estado] ?? 9);
         });
-        setPedidos(filtrados);
+        setPedidosActivos(filtrados);
         setLoading(false);
 
         const currentIds = new Set(filtrados.map(p => p.id));
@@ -105,12 +115,51 @@ export default function PedidosAsignadosOperario() {
     return () => unsub();
   }, [user?.uid, toast]);
 
+  // Pedidos despachados (pendientes de control/entrega) asignados a este operario
+  useEffect(() => {
+    if (!user?.uid) return;
+    setLoadingDespacho(true);
+    const unsub = listenPedidosDespachadosOperario(user.uid, {
+      onChange: (snap) => {
+        const arr = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(p => p.necesitaControl !== false)
+          .map(p => ({ ...p, estado: ESTADO_DESPACHADO, _isDespacho: true }));
+        setPedidosDespacho(arr);
+        setLoadingDespacho(false);
+
+        const currentIds = new Set(arr.map(p => p.id));
+        const newOnes = [];
+        if (!firstDespSnapRef.current) {
+          for (const p of arr) {
+            if (!prevDespIdsRef.current.has(p.id)) newOnes.push(p);
+          }
+        } else {
+          firstDespSnapRef.current = false;
+        }
+        prevDespIdsRef.current = currentIds;
+        if (newOnes.length > 0) {
+          setBadges(prev => ({ ...prev, [ESTADO_DESPACHADO]: (prev[ESTADO_DESPACHADO] || 0) + newOnes.length }));
+          if (soundOn) playNotif();
+        }
+      },
+      onError: (e) => {
+        console.error(e);
+        setLoadingDespacho(false);
+      }
+    });
+    return () => unsub();
+  }, [user?.uid, soundOn, playNotif]);
+
+  const pedidos = useMemo(() => [...pedidosActivos, ...pedidosDespacho], [pedidosActivos, pedidosDespacho]);
+
   const grupos = useMemo(() => agruparPorEstadoYFecha(pedidos), [pedidos]);
   const estadosOrdenados = useMemo(() => ordenarEstados(Object.keys(grupos)), [grupos]);
 
   const nombre = profile?.nombre || user?.displayName || "Operario";
   const enPreparacion = pedidos.filter(p => p.estado === "EN_PREPARACION");
   const asignados = pedidos.filter(p => p.estado === "ASIGNADO");
+  const loadingTotal = loading || loadingDespacho;
 
   return (
     <div style={{ background: "#f8fafc", minHeight: "100vh" }}>
@@ -125,7 +174,7 @@ export default function PedidosAsignadosOperario() {
         </h1>
 
         {/* Resumen numérico */}
-        {!loading && pedidos.length > 0 && (
+        {!loadingTotal && pedidos.length > 0 && (
           <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
             {enPreparacion.length > 0 && (
               <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "10px", padding: "8px 16px", textAlign: "center" }}>
@@ -150,13 +199,13 @@ export default function PedidosAsignadosOperario() {
       {/* ── Contenido ── */}
       <div style={{ padding: "12px 12px 60px" }}>
 
-        {loading && (
+        {loadingTotal && (
           <div style={{ textAlign: "center", padding: "48px 0", color: "#94a3b8", fontSize: "0.9rem" }}>
             Cargando tus pedidos…
           </div>
         )}
 
-        {!loading && pedidos.length === 0 && (
+        {!loadingTotal && pedidos.length === 0 && (
           <div style={{ textAlign: "center", padding: "60px 24px" }}>
             <div style={{ fontSize: "3rem", marginBottom: "12px" }}>✅</div>
             <p style={{ fontWeight: 700, fontSize: "1rem", color: "#0f172a", margin: "0 0 6px" }}>
@@ -169,7 +218,7 @@ export default function PedidosAsignadosOperario() {
         )}
 
         {/* Grupos por estado (EN_PREPARACION primero) */}
-        {!loading && estadosOrdenados.map((estado) => {
+        {!loadingTotal && estadosOrdenados.map((estado) => {
           const porFecha = grupos[estado];
           const cfg = ESTADO_CONFIG[estado] || { label: estado, icon: "📋", color: "#64748b", bg: "#f8fafc", border: "#e2e8f0" };
           const allItems = Object.values(porFecha).flat();
@@ -208,15 +257,20 @@ export default function PedidosAsignadosOperario() {
 
               {/* Cards */}
               {allItems.map((p) => {
-                const timeAgo = formatTimeAgo(p.timestamps?.[p.estado]);
+                const timeAgo = p._isDespacho
+                  ? formatTimeAgo(p.despachadoAt || p.timestamps?.DESPACHADO)
+                  : formatTimeAgo(p.timestamps?.[p.estado]);
                 const fechaCorta = formatFechaCorta(p);
                 const itemCount = Array.isArray(p.productos) ? p.productos.length : 0;
                 const metodoStyle = METODO_COLORS[p.metodoEntrega] || { bg: "#f8fafc", color: "#475569" };
+                const href = p._isDespacho
+                  ? `/encargado/entrega/${encodeURIComponent(p.id)}`
+                  : `/pedidos-operario/${encodeURIComponent(p.id)}`;
 
                 return (
                   <Link
                     key={p.id}
-                    to={`/pedidos-operario/${encodeURIComponent(p.id)}`}
+                    to={href}
                     style={{
                       display: "block",
                       textDecoration: "none",
@@ -275,7 +329,7 @@ export default function PedidosAsignadosOperario() {
                         marginLeft: "auto", flexShrink: 0,
                         fontSize: "0.8rem", fontWeight: 700, color: cfg.color,
                       }}>
-                        {isEnPrep ? "Continuar →" : "Iniciar →"}
+                        {p._isDespacho ? "Controlar →" : (isEnPrep ? "Continuar →" : "Iniciar →")}
                       </span>
                     </div>
                   </Link>

@@ -61,6 +61,19 @@ function formatFechaCorta(d) {
   return d.toLocaleDateString("es-AR", { day: "2-digit", month: "short" });
 }
 
+// Resuelve el nombre del responsable/operario asignado al pedido
+function getResponsable(p) {
+  return (
+    p?.asignadoNombre ||
+    p?.asignado?.nombre ||
+    p?.asignado?.displayName ||
+    p?.operarioNombre ||
+    p?.responsableNombre ||
+    p?.responsable?.nombre ||
+    null
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 //  PipelineCard
 // ─────────────────────────────────────────────────────────────
@@ -71,6 +84,7 @@ function PipelineCard({ p, cfg }) {
   const items = p.productos?.length ?? p.items?.length ?? 0;
   const timeAgo = formatTimeAgo(p.timestamps?.[p.estado] || p.updatedAt);
   const creacion = getPedidoDate(p);
+  const responsable = getResponsable(p);
 
   const metodoColors = {
     AGENCIA: { bg: "#eff6ff", color: "#1d4ed8" },
@@ -167,6 +181,15 @@ function PipelineCard({ p, cfg }) {
             padding: "1px 6px", borderRadius: "999px",
           }}>
             {p.metodoEntrega}
+          </span>
+        )}
+        {/* Responsable / operario asignado */}
+        {responsable && (
+          <span style={{
+            fontSize: "0.6rem", color: "#64748b",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100px",
+          }}>
+            👤 {responsable}
           </span>
         )}
         {/* Fecha de creación (referencia) */}

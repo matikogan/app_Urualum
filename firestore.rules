@@ -5,9 +5,10 @@ service cloud.firestore {
     // === Pedidos entregados — histórico permanente para analytics ===
     match /pedidos_entregados/{id} {
       allow read:   if isAuthed();
-      // Solo encargado (del mismo depósito) o admin pueden registrar una entrega
+      // Solo encargado (del mismo depósito), admin, o el operario asignado pueden registrar una entrega
       allow create: if isAuthed() && (
         (isEncargado() && request.resource.data.deposito == userDeposito()) ||
+        (isOperario() && request.resource.data.operarioId == request.auth.uid) ||
         isAdmin()
       );
       // Ventas puede registrar/editar el pago (solo campos pago y pagoHistorial)
@@ -41,9 +42,11 @@ service cloud.firestore {
 
       // Admin puede borrar (reset en testing)
       // Encargado puede borrar pedidos DESPACHADOS de su depósito (fallback de migración)
+      // Operario asignado puede borrar al confirmar la entrega (control previo a entrega)
       allow delete: if request.auth != null && (
         isAdmin() ||
-        (isEncargado() && resource.data.deposito == userDeposito())
+        (isEncargado() && resource.data.deposito == userDeposito()) ||
+        (isOperario() && resource.data.operarioId == request.auth.uid)
       );
     }
 
