@@ -1124,6 +1124,7 @@ export default function PedidosPage() {
                   const despachadoAgo = formatTimeAgo(
                     p.despachadoAt || p.timestamps?.DESPACHADO || p.updatedAt
                   );
+                  const responsable = getResponsable(p);
                   return (
                     <div
                       key={p.id}
@@ -1149,9 +1150,16 @@ export default function PedidosPage() {
                         <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {p.cliente || "—"}
                         </p>
-                        {p.metodoEntrega && (
-                          <span style={{ fontSize: "0.7rem", color: "#64748b" }}>🚚 {p.metodoEntrega}</span>
-                        )}
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                          {p.metodoEntrega && (
+                            <span style={{ fontSize: "0.7rem", color: "#64748b" }}>🚚 {p.metodoEntrega}</span>
+                          )}
+                          {responsable && (
+                            <span style={{ fontSize: "0.7rem", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "130px" }}>
+                              👤 {responsable}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <span style={{ flexShrink: 0, color: "#dc2626", fontSize: "0.8rem", fontWeight: 700 }}>
                         Controlar →
@@ -1206,6 +1214,7 @@ export default function PedidosPage() {
                   const despachadoAgo = formatTimeAgo(
                     p.despachadoAt || p.timestamps?.DESPACHADO || p.updatedAt
                   );
+                  const responsable = getResponsable(p);
                   return (
                     <div
                       key={p.id}
@@ -1231,9 +1240,16 @@ export default function PedidosPage() {
                         <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {p.cliente || "—"}
                         </p>
-                        {p.metodoEntrega && (
-                          <span style={{ fontSize: "0.7rem", color: "#64748b" }}>🚚 {p.metodoEntrega}</span>
-                        )}
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                          {p.metodoEntrega && (
+                            <span style={{ fontSize: "0.7rem", color: "#64748b" }}>🚚 {p.metodoEntrega}</span>
+                          )}
+                          {responsable && (
+                            <span style={{ fontSize: "0.7rem", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "130px" }}>
+                              👤 {responsable}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <span style={{ flexShrink: 0, color: "#b45309", fontSize: "0.8rem", fontWeight: 700 }}>
                         Entregar →
