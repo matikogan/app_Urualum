@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { fixEncoding } from "utils/text";
 import { useApp } from "../../../context/AppContext";
 import { useAuth } from "../../../context/AuthContext";
 import { getPedido } from "../services/pedidosFS";
@@ -33,11 +34,13 @@ function keyFor(it, i) {
   return `${(it.cod || it.codigo || it.codigoURU || "IDX")}-${i}`;
 }
 
-// Nombre legible del producto: usa descripcion del item o fallback a customerNo del catálogo
+// Nombre legible del producto: usa descripcion del item o fallback a customerNo del catálogo.
+// fixEncoding corrige mojibake de Windows-1252 que Finnegans puede enviar mal codificado.
 function getNombreProducto(it, cat) {
   const desc = it.descripcion || it.desc || it.nombre || "";
-  if (desc) return desc;
-  return cat?.customerNo || cat?.customer_no || it.cod || it.codigo || it.codigoURU || "Producto";
+  if (desc) return fixEncoding(desc);
+  const fallback = cat?.customerNo || cat?.customer_no || it.cod || it.codigo || it.codigoURU || "Producto";
+  return fixEncoding(fallback);
 }
 
 // ============== Pantalla ==============
@@ -153,12 +156,16 @@ export default function PedidoDetalleOperario() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pedido?.estado, pedido?.operarioId, user?.uid]);
 
+  // ¿Es ISABELA? El operario de ISABELA finaliza en CONTROLADO (sin paso de control del encargado)
+  const esIsabela = (pedido?.deposito || "").trim().toUpperCase() === "ISABELA";
+
   // Redirect al completarse
   useEffect(() => {
-    if (pedido?.estado === ESTADOS.PREPARADO) {
-      setTimeout(() => navigate("/operario/asignados"), 1800);
+    const estadoFinal = esIsabela ? ESTADOS.CONTROLADO : ESTADOS.PREPARADO;
+    if (pedido?.estado === estadoFinal) {
+      setTimeout(() => navigate("/pedidos"), 1800);
     }
-  }, [pedido?.estado, navigate]);
+  }, [pedido?.estado, esIsabela, navigate]);
 
   // ===== LITE: productos — todos los del pedido =====
   const productosLite = useMemo(() => pedido?.productos || [], [pedido?.productos]);
@@ -256,7 +263,10 @@ export default function PedidoDetalleOperario() {
     try {
       setSaving(true);
       await updateDoc(doc(db, "pedidos", pedido.id || pedidoId), { prepPerfilesOk: true });
-      await cambiarEstado(pedidoId, ESTADOS.PREPARADO);
+      // ISABELA: operario finaliza en CONTROLADO (sin paso intermedio de control del encargado)
+      // R8: finaliza en PREPARADO (el encargado hace el control físico después)
+      const estadoDestino = esIsabela ? ESTADOS.CONTROLADO : ESTADOS.PREPARADO;
+      await cambiarEstado(pedidoId, estadoDestino);
       haptics?.success?.();
       toast?.success?.("¡Pedido preparado!");
       const p = await getPedido(pedidoId);
@@ -367,7 +377,8 @@ export default function PedidoDetalleOperario() {
 
       {/* ── Header ─────────────────────────────── */}
       <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px" }}>
-        <VolverListaPedidos to="/operario/asignados" />
+        {/* ISABELA operario vuelve al pipeline; R8 operario vuelve a su lista */}
+        <VolverListaPedidos to={esIsabela ? "/pedidos" : "/operario/asignados"} />
         <div style={{ marginTop: "10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
           <div>
             <p style={{ margin: 0, fontSize: "0.72rem", fontWeight: 600, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>
@@ -472,11 +483,12 @@ export default function PedidoDetalleOperario() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{
                       margin: 0,
-                      fontSize: "0.9rem",
+                      fontSize: "0.85rem",
                       fontWeight: 600,
                       color: cargado ? "#15803d" : "#1e293b",
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      lineHeight: 1.35,
                       textDecoration: cargado ? "line-through" : "none",
+                      wordBreak: "break-word",
                     }}>
                       {nombre}
                     </p>
@@ -712,7 +724,7 @@ export default function PedidoDetalleOperario() {
                       transition: "all 0.1s ease",
                     }}
                   >
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{nombre}</span>
+                    <span style={{ flex: 1, fontSize: "0.85rem", lineHeight: 1.35, wordBreak: "break-word" }}>{nombre}</span>
                     <span style={{ flexShrink: 0, marginLeft: "8px", background: selected ? "#dbeafe" : "#f1f5f9", color: selected ? "#1d4ed8" : "#64748b", fontWeight: 700, fontSize: "0.78rem", padding: "2px 7px", borderRadius: "6px" }}>
                       ×{qty}
                     </span>

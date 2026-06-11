@@ -5,6 +5,7 @@ import { useAuth } from "../../../context/AuthContext";
 import { db } from "../../../firebase";
 import { useNavigate } from "react-router-dom";
 import { AGENCIAS } from "../services/parseDescripcionPedido";
+import PagoModal from "../components/PagoModal";
 
 // TODO: RUT del cliente — en standby hasta integración con Finnegans
 // const [clienteRUT, setClienteRUT] = useState("");
@@ -19,6 +20,7 @@ export default function ConfirmarDespacho({ pedidoId, onDone, compact = false })
   const [showSelector, setShowSelector] = useState(false);
   const [loading, setLoading]           = useState(false);
   const [loadingData, setLoadingData]   = useState(true);
+  const [despachado, setDespachado]     = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +71,7 @@ export default function ConfirmarDespacho({ pedidoId, onDone, compact = false })
       await deleteDoc(ref);
       haptics?.success?.();
       toast.success("Pedido marcado como DESPACHADO");
-      if (onDone) onDone(); else navigate("/pedidos");
+      setDespachado(true);
     } catch (e) {
       console.error(e);
       haptics?.error?.();
@@ -200,6 +202,21 @@ export default function ConfirmarDespacho({ pedidoId, onDone, compact = false })
           </>
         )}
       </button>
+
+      {/* ── PagoModal obligatorio post-despacho ── */}
+      {despachado && (
+        <PagoModal
+          pedidoId={String(pedidoId)}
+          pedidoInfo={pedido}
+          pagosActuales={[]}
+          historial={[]}
+          mandatory={true}
+          onClose={() => {}}
+          onSaved={() => {
+            if (onDone) onDone(); else navigate("/pedidos");
+          }}
+        />
+      )}
 
       {/* ── Modal selector de agencia ── */}
       {showSelector && (

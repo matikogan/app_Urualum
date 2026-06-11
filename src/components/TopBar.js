@@ -10,7 +10,10 @@ export default function TopBar() {
   const { user, profile } = useAuth();
   const name =
     profile?.nombre || user?.displayName || user?.email?.split("@")[0] || "Usuario";
-  const role = profile?.role || profile?.rol || "—";
+  // Si cualquiera de los campos es "visor", mostramos "visor" (prevalece sobre rol viejo)
+  const _rf = (profile?.role || "").toLowerCase();
+  const _rl = (profile?.rol  || "").toLowerCase();
+  const role = (_rf === "visor" || _rl === "visor") ? "visor" : (_rf || _rl || "—");
 
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);

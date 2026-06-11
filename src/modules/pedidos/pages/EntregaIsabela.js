@@ -72,6 +72,7 @@ export default function EntregaIsabela() {
       setSaving(true);
       const sourceCollection = source === "despachados" ? "pedidos_despachados" : "pedidos";
       const sourceRef = doc(db, sourceCollection, String(id));
+      console.log("[EntregaIsabela] handleEntregar — source:", sourceCollection, "id:", id);
 
       // Grab latest snapshot to ensure we have full data
       const snap = await getDoc(sourceRef);
@@ -80,24 +81,37 @@ export default function EntregaIsabela() {
         return;
       }
       const data = snap.data();
+      console.log("[EntregaIsabela] data.deposito:", data.deposito, "| user.uid:", user?.uid);
 
       // Write permanent record
-      await setDoc(doc(db, "pedidos_entregados", String(id)), {
-        ...data,
-        estado: "ENTREGADO",
-        entregadoAt: serverTimestamp(),
-        entregadoPor: user?.uid || null,
-        source: "app-entrega",
-      });
+      try {
+        await setDoc(doc(db, "pedidos_entregados", String(id)), {
+          ...data,
+          estado: "ENTREGADO",
+          entregadoAt: serverTimestamp(),
+          entregadoPor: user?.uid || null,
+          source: "app-entrega",
+        });
+        console.log("[EntregaIsabela] setDoc pedidos_entregados OK");
+      } catch (e1) {
+        console.error("[EntregaIsabela] setDoc pedidos_entregados FALLÓ:", e1.code, e1.message);
+        throw e1;
+      }
 
       // Remove from source collection
-      await deleteDoc(sourceRef);
+      try {
+        await deleteDoc(sourceRef);
+        console.log("[EntregaIsabela] deleteDoc", sourceCollection, "OK");
+      } catch (e2) {
+        console.error("[EntregaIsabela] deleteDoc", sourceCollection, "FALLÓ:", e2.code, e2.message);
+        throw e2;
+      }
 
       haptics?.success?.();
       toast.success("Pedido entregado ✓");
       navigate("/pedidos");
     } catch (e) {
-      console.error(e);
+      console.error("[EntregaIsabela] error general:", e);
       haptics?.error?.();
       toast.error(e?.message || "No se pudo registrar la entrega");
     } finally {

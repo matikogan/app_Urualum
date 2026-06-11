@@ -20,6 +20,7 @@ import { useApp } from "../../../context/AppContext";
 import { useNavigate } from "react-router-dom";
 import { syncPendientesDeHoy } from "../services/syncFinnegans";
 import { FLUJO_ISABELA, FLUJO_R8 } from "../services/estadosConfig";
+import AsignarDepositoModal from "../components/AsignarDepositoModal";
 
 // Aliases locales para mantener los nombres que usa este componente
 const STATES_ISABELA = FLUJO_ISABELA;
@@ -30,6 +31,9 @@ const STATES_R8      = FLUJO_R8;
 // ─────────────────────────────────────────────────────────────
 
 const STUCK_MS = 2 * 24 * 3600 * 1000;
+
+// Estados donde ventas puede reasignar el depósito (antes de que el operario prepare el pedido)
+const ESTADOS_REASIGNABLES = new Set(["PENDIENTE_ASIGNAR", "ASIGNADO", "EN_PREPARACION", "CON_ERROR", "ERROR_CONFIRMADO"]);
 
 function isStuck(p) {
   if (!p.updatedAt?.seconds) return false;
@@ -65,12 +69,14 @@ function formatFechaCorta(d) {
 //  PipelineCard
 // ─────────────────────────────────────────────────────────────
 
-function PipelineCard({ p, cfg }) {
+function PipelineCard({ p, cfg, onReasignar, pagosSet }) {
   const navigate = useNavigate();
   const stuck = isStuck(p);
   const items = p.productos?.length ?? p.items?.length ?? 0;
   const timeAgo = formatTimeAgo(p.timestamps?.[p.estado] || p.updatedAt);
   const creacion = getPedidoDate(p);
+  const puedeReasignar = onReasignar && ESTADOS_REASIGNABLES.has(p.estado);
+  const isPagado = !!pagosSet?.has(p.id);
 
   const metodoColors = {
     AGENCIA: { bg: "#eff6ff", color: "#1d4ed8" },
@@ -169,6 +175,16 @@ function PipelineCard({ p, cfg }) {
             {p.metodoEntrega}
           </span>
         )}
+        {isPagado && (
+          <span style={{
+            fontSize: "0.58rem", fontWeight: 700,
+            background: "#f0fdf4", color: "#15803d",
+            padding: "1px 6px", borderRadius: "999px",
+            border: "1px solid #86efac",
+          }}>
+            💳 Pagado
+          </span>
+        )}
         {/* Fecha de creación (referencia) */}
         {creacion && p.estado !== "PENDIENTE_ASIGNAR" && (
           <span style={{ fontSize: "0.6rem", color: "#94a3b8", marginLeft: "auto" }}>
@@ -185,6 +201,32 @@ function PipelineCard({ p, cfg }) {
           </span>
         )}
       </div>
+
+      {/* Botón reasignar depósito — solo en estados pre-preparado */}
+      {puedeReasignar && (
+        <button
+          onClick={e => { e.stopPropagation(); onReasignar(p); }}
+          title="Cambiar depósito o método de entrega"
+          style={{
+            marginTop: "8px",
+            width: "100%",
+            padding: "5px 8px",
+            border: "1px solid #e2e8f0",
+            borderRadius: "6px",
+            background: "#f8fafc",
+            color: "#64748b",
+            fontSize: "0.68rem",
+            fontWeight: 600,
+            cursor: "pointer",
+            textAlign: "center",
+            transition: "all 0.12s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = "#f1f5f9"; e.currentTarget.style.color = "#334155"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.color = "#64748b"; }}
+        >
+          ↕ Cambiar destino
+        </button>
+      )}
     </div>
   );
 }
@@ -193,7 +235,7 @@ function PipelineCard({ p, cfg }) {
 //  PipelineColumn
 // ─────────────────────────────────────────────────────────────
 
-function PipelineColumn({ cfg, items, colHeight }) {
+function PipelineColumn({ cfg, items, colHeight, onReasignar, pagosSet }) {
   const stuckCount = items.filter(isStuck).length;
 
   return (
@@ -289,7 +331,7 @@ function PipelineColumn({ cfg, items, colHeight }) {
           </p>
         ) : (
           items.map(p => (
-            <PipelineCard key={p.id} p={p} cfg={cfg} />
+            <PipelineCard key={p.id} p={p} cfg={cfg} onReasignar={onReasignar} pagosSet={pagosSet} />
           ))
         )}
       </div>
@@ -313,9 +355,31 @@ export default function PipelineVentas() {
   const [pedidos, setPedidos]               = useState([]);
   const [despachadosAll, setDespachadosAll] = useState([]);
   const [entregadosAll, setEntregadosAll]   = useState([]);
+  const [pagosPendientes, setPagosPendientes] = useState(0);
+  const [pagosSet,      setPagosSet]        = useState(new Set());
+  const [sinDeposito,   setSinDeposito]     = useState(0);
   const [loading, setLoading]               = useState(true);
   const [searchQ, setSearchQ]               = useState("");
   const [filterDeposito, setFilterDeposito] = useState(depositoInicial);
+  const [reasignando, setReasignando]       = useState(null); // pedido a reasignar
+  const [isMobile, setIsMobile]             = useState(() => window.innerWidth < 768);
+
+  // ── Detectar mobile/desktop (resizable) ──
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  // ── Detección de rol ──
+  // Chequeamos ambos campos para cubrir perfiles con role/rol mixtos
+  const _roleField = (profile?.role || "").toLowerCase();
+  const _rolField  = (profile?.rol  || "").toLowerCase();
+  const _role      = _roleField || _rolField;
+  // soloLectura: visor puede ver todo pero no actuar (en cualquiera de los dos campos)
+  const soloLectura = _roleField === "visor" || _rolField === "visor";
+  // puedeReasignarDeposito: solo ventas y admin pueden cambiar el destino de un pedido
+  const puedeReasignarDeposito = (_role === "ventas" || _role === "admin") && !soloLectura;
   const [syncing, setSyncing]               = useState(false);
   const [lastSync, setLastSync]             = useState(null);
   const syncRunRef                          = useRef(false);
@@ -459,6 +523,53 @@ export default function PipelineVentas() {
     return () => unsub();
   }, []);
 
+  // ── Listener pagos — contador de pendientes + Set de pedidosId con pago ──
+  // Solo para ventas/admin (respeta la regla de Firestore). Se espera a que el perfil esté cargado.
+  useEffect(() => {
+    const rf = (profile?.role || "").toLowerCase();
+    const rl = (profile?.rol  || "").toLowerCase();
+    const role = rf || rl;
+    const isVisorUser = rf === "visor" || rl === "visor";
+    if (!role || (!isVisorUser && role !== "ventas" && role !== "admin")) return;
+
+    // Escuchamos TODOS los pagos para construir el Set de pedidoIds pagados
+    const q = query(collection(db, "pagos"));
+    const unsub = onSnapshot(q,
+      snap => {
+        let pendientes = 0;
+        const ids = new Set();
+        snap.forEach(d => {
+          ids.add(d.id); // el doc id ES el pedidoId
+          if (d.data().pagoEstado === "PENDIENTE") pendientes++;
+        });
+        setPagosSet(ids);
+        setPagosPendientes(pendientes);
+      },
+      err  => console.error("[PipelineVentas] pagos:", err)
+    );
+    return () => unsub();
+  }, [profile?.role, profile?.rol]);
+
+  // ── Listener: conteo de pedidos sin depósito asignado ──
+  useEffect(() => {
+    const EXCLUIDOS = ["CANCELADO", "ANULADO", "DESPACHADO", "ENTREGADO"];
+    let nullCount = 0, emptyCount = 0;
+    function update() {
+      setSinDeposito(nullCount + emptyCount);
+    }
+    const qNull = query(collection(db, "pedidos"), where("deposito", "==", null), limit(500));
+    const qEmpty = query(collection(db, "pedidos"), where("deposito", "==", ""), limit(500));
+    const unsubNull = onSnapshot(qNull,
+      snap => { nullCount  = snap.docs.filter(d => !EXCLUIDOS.includes(d.data().estado)).length; update(); },
+      err  => console.error("[PipelineVentas] sinDeposito null:", err)
+    );
+    const unsubEmpty = onSnapshot(qEmpty,
+      snap => { emptyCount = snap.docs.filter(d => !EXCLUIDOS.includes(d.data().estado)).length; update(); },
+      err  => console.error("[PipelineVentas] sinDeposito empty:", err)
+    );
+    return () => { unsubNull(); unsubEmpty(); };
+  }, []);
+
   // ── Depósitos disponibles ──
   // Base fija para que los chips siempre aparezcan aunque no haya pedidos activos.
   // Se complementa con cualquier depósito extra que aparezca en Firestore.
@@ -474,8 +585,13 @@ export default function PipelineVentas() {
   // ── ¿Estamos viendo ISABELA? ──
   const isIsabela = filterDeposito.toUpperCase() === "ISABELA";
 
-  // Config de estados según depósito seleccionado
-  const stateConfig = isIsabela ? STATES_ISABELA : STATES_R8;
+  // Config de estados según depósito seleccionado.
+  // Para visor (soloLectura) quitamos los colores de acción — no tiene nada que hacer.
+  const stateConfig = useMemo(() => {
+    const base = isIsabela ? STATES_ISABELA : STATES_R8;
+    if (!soloLectura) return base;
+    return base.map(cfg => ({ ...cfg, ventasAction: false }));
+  }, [isIsabela, soloLectura]);
 
   // ── Filtro base de pedidos ──
   const pedidosFiltrados = useMemo(() => {
@@ -552,10 +668,22 @@ export default function PipelineVentas() {
       .map(p => ({ ...p, estado: "DESP_PENDIENTE", _hideDeposito: !!filterDeposito }))
   , [despsNoActivos, filterDeposito]);
 
-  // ── Helper: filtra entregadosAll por depósito y búsqueda ──
+  // ── Helper: filtra entregadosAll por depósito, búsqueda y fecha (solo HOY) ──
   const entregadosFiltrados = useMemo(() => {
     const nq = searchQ.trim().toLowerCase();
+    const hoyMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+
     return entregadosAll.filter(p => {
+      // Sólo pedidos entregados HOY — si no tiene fecha válida de hoy, no aparece en pipeline
+      const ts = p.entregadoAt?.seconds
+        ? p.entregadoAt.seconds * 1000
+        : p.entregadoAt instanceof Date
+          ? p.entregadoAt.getTime()
+          : typeof p.entregadoAt === "number"
+            ? p.entregadoAt
+            : null;
+      if (ts === null || ts < hoyMs) return false;
+
       if (filterDeposito) {
         const dep = String(p.deposito || "").trim().toUpperCase();
         if (dep !== filterDeposito.trim().toUpperCase()) return false;
@@ -820,9 +948,74 @@ export default function PipelineVentas() {
         >
           📦 Entregados
         </a>
+
+        {/* Link a pedidos sin depósito con badge — solo si puede actuar */}
+        {!soloLectura && <a
+          href="/ventas/sin-deposito"
+          title="Pedidos sin depósito asignado"
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            gap: "5px",
+            height: "32px",
+            padding: "0 11px",
+            background: sinDeposito > 0 ? "#fff7ed" : "#f8fafc",
+            border: `1px solid ${sinDeposito > 0 ? "#fdba74" : "#e2e8f0"}`,
+            borderRadius: "8px", textDecoration: "none",
+            fontSize: "0.74rem", fontWeight: 700,
+            color: sinDeposito > 0 ? "#c2410c" : "#64748b",
+            flexShrink: 0,
+            whiteSpace: "nowrap",
+          }}
+        >
+          🗂️ Sin clasificar
+          {sinDeposito > 0 && (
+            <span style={{
+              background: "#f97316", color: "#fff",
+              fontSize: "0.62rem", fontWeight: 800,
+              padding: "1px 5px", borderRadius: "999px",
+              lineHeight: 1.4,
+            }}>
+              {sinDeposito}
+            </span>
+          )}
+        </a>}
+
+        {/* Link a Pagos con badge de pendientes — solo si puede actuar */}
+        {!soloLectura && (
+          <a
+            href="/ventas/pagos"
+            title="Pagos de pedidos despachados"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              gap: "5px",
+              height: "32px",
+              padding: "0 11px",
+              background: pagosPendientes > 0 ? "#fffbeb" : "#f8fafc",
+              border: `1px solid ${pagosPendientes > 0 ? "#fde68a" : "#e2e8f0"}`,
+              borderRadius: "8px", textDecoration: "none",
+              fontSize: "0.74rem", fontWeight: 700,
+              color: pagosPendientes > 0 ? "#b45309" : "#64748b",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+              position: "relative",
+            }}
+          >
+            💰 Pagos
+            {pagosPendientes > 0 && (
+              <span style={{
+                background: "#ef4444", color: "#fff",
+                fontSize: "0.62rem", fontWeight: 800,
+                padding: "1px 5px", borderRadius: "999px",
+                lineHeight: 1.4,
+              }}>
+                {pagosPendientes}
+              </span>
+            )}
+          </a>
+        )}
       </div>
 
-      {/* ── Kanban board ── */}
+      {/* ── Kanban / Vista mobile ── */}
       {loading ? (
         <div style={{
           flex: 1, display: "flex",
@@ -831,12 +1024,70 @@ export default function PipelineVentas() {
         }}>
           Cargando pedidos…
         </div>
+      ) : isMobile ? (
+        /* ── Vista mobile: secciones verticales en orden de flujo ── */
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+          {stateConfig.map(cfg => {
+            const items = byEstado[cfg.id] || [];
+            // Ocultar secciones vacías que no son de acción (para reducir ruido)
+            if (items.length === 0 && !cfg.ventasAction) return null;
+            return (
+              <div key={cfg.id} style={{ marginBottom: "16px" }}>
+                {/* Header de sección */}
+                <div style={{
+                  display: "flex", alignItems: "center", gap: "6px",
+                  padding: "7px 10px",
+                  background: cfg.ventasAction ? cfg.headerBg : "#f8fafc",
+                  border: `1px solid ${cfg.ventasAction ? cfg.border : "#e2e8f0"}`,
+                  borderRadius: items.length > 0 ? "10px 10px 0 0" : "10px",
+                  borderBottom: items.length > 0 ? "none" : undefined,
+                }}>
+                  <span style={{ fontSize: "0.85rem", lineHeight: 1 }}>{cfg.icon}</span>
+                  <span style={{
+                    flex: 1, fontWeight: 700, fontSize: "0.78rem",
+                    color: cfg.ventasAction ? cfg.color : "#475569",
+                  }}>
+                    {cfg.label}
+                  </span>
+                  <span style={{
+                    background: items.length > 0 ? cfg.color + "22" : "#f1f5f9",
+                    color: items.length > 0 ? cfg.color : "#94a3b8",
+                    fontSize: "0.7rem", fontWeight: 700,
+                    padding: "1px 8px", borderRadius: "999px",
+                  }}>
+                    {items.length}
+                  </span>
+                </div>
+                {/* Cards de la sección */}
+                {items.length > 0 && (
+                  <div style={{
+                    border: `1px solid ${cfg.ventasAction ? cfg.border : "#e2e8f0"}`,
+                    borderTop: "none",
+                    borderRadius: "0 0 10px 10px",
+                    background: "#fff",
+                    padding: "8px",
+                    display: "flex", flexDirection: "column", gap: "6px",
+                  }}>
+                    {items.map(p => (
+                      <PipelineCard
+                        key={p.id}
+                        p={p}
+                        cfg={cfg}
+                        onReasignar={puedeReasignarDeposito ? setReasignando : null}
+                        pagosSet={pagosSet}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : (
+        /* ── Vista desktop: kanban horizontal ── */
         <div style={{
           flex: 1,
           display: "grid",
-          /* Columnas distribuyen el ancho disponible equitativamente.
-             minmax garantiza que no se compriman demasiado (mín 160px). */
           gridTemplateColumns: `repeat(${stateConfig.length}, minmax(160px, 1fr))`,
           gap: "10px",
           padding: "10px 16px",
@@ -850,9 +1101,21 @@ export default function PipelineVentas() {
               cfg={cfg}
               items={byEstado[cfg.id] || []}
               colHeight={colHeight}
+              onReasignar={puedeReasignarDeposito ? setReasignando : null}
+              pagosSet={pagosSet}
             />
           ))}
         </div>
+      )}
+
+      {/* Modal reasignar depósito */}
+      {reasignando && (
+        <AsignarDepositoModal
+          pedido={reasignando}
+          titulo="Reasignar depósito"
+          onClose={() => setReasignando(null)}
+          onSaved={() => setReasignando(null)}
+        />
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import { parseDescripcionPedido } from "./parseDescripcionPedido";
+import { fixEncoding } from "../../../utils/text";
 
 // Mapeo nombre → código de condición de pago (Finnegans no devuelve el código)
 const CONDICION_PAGO_MAP = {
@@ -204,7 +205,7 @@ export function mapFinDocToPedido(fin) {
 
   const productos = prodCod ? [{
     cod:         prodCod,
-    desc:        prodRaw,           // descripción completa para mostrar en UI
+    desc:        fixEncoding(prodRaw), // descripción completa para mostrar en UI
     cant:        prodCant || 0,
     precioUSD:   prodPrecioUSD || null,
     precioUYU:   prodPrecioUYU || null,

@@ -5,18 +5,11 @@ service cloud.firestore {
     // === Pedidos entregados — histórico permanente para analytics ===
     match /pedidos_entregados/{id} {
       allow read:   if isAuthed();
-      // Solo encargado (del mismo depósito) o admin pueden registrar una entrega
-      allow create: if isAuthed() && (
-        (isEncargado() && request.resource.data.deposito == userDeposito()) ||
-        isAdmin()
-      );
-      // Ventas puede registrar/editar el pago (solo campos pago y pagoHistorial)
-      // Admin puede hacer cualquier corrección
-      allow update: if isAuthed() && (
-        isAdmin() ||
-        (isVentas() && request.resource.data.diff(resource.data).changedKeys()
-          .hasOnly(['pago', 'pagoHistorial']))
-      );
+      // Encargado, operario ISABELA, o admin pueden registrar una entrega.
+      // La restricción por depósito se aplica en la UI.
+      allow create: if isAuthed() && (isEncargado() || isOperario() || isAdmin());
+      // Encargado/operario pueden sobreescribir (setDoc sobre doc existente = update, ej: retry)
+      allow update: if isAuthed() && (isEncargado() || isOperario() || isAdmin());
       allow delete: if isAuthed() && isAdmin();
     }
 
@@ -40,11 +33,9 @@ service cloud.firestore {
       );
 
       // Admin puede borrar (reset en testing)
-      // Encargado puede borrar pedidos DESPACHADOS de su depósito (fallback de migración)
-      allow delete: if request.auth != null && (
-        isAdmin() ||
-        (isEncargado() && resource.data.deposito == userDeposito())
-      );
+      // Encargado o operario pueden borrar pedidos de su depósito (flujo de entrega)
+      // La restricción por depósito se aplica en la UI.
+      allow delete: if request.auth != null && (isAdmin() || isEncargado() || isOperario());
     }
 
 
@@ -58,7 +49,9 @@ service cloud.firestore {
       return request.auth != null;
     }
     function userRole() {
-      return userDoc().data.role;
+      // Soportamos ambos campos: "role" (legacy) y "rol" (actual)
+      let data = userDoc().data;
+      return data.role != null ? data.role : data.rol;
     }
     function userDeposito() {
       return userDoc().data.deposito;
@@ -71,6 +64,10 @@ service cloud.firestore {
     }
     function isOperario() {
       return userRole() == "operario";
+    }
+
+    function isVisor() {
+      return userRole() == "visor";
     }
 
     // 🔥 ACÁ PONEMOS AL ADMIN PARA QUE TODOS LO VEAN
@@ -86,16 +83,17 @@ service cloud.firestore {
       // 1. Tu propio doc: PERMITIDO
       allow get: if isAuthed() && request.auth.uid == uid;
 
-      // 2. Listar: Permitido para Staff (Encargado/Ventas)
-      allow list: if isAuthed() && (isEncargado() || isVentas());
+      // 2. Listar: Permitido para Staff (Encargado/Ventas/Visor)
+      allow list: if isAuthed() && (isEncargado() || isVentas() || isVisor());
 
       // 3. Leer (Get/List):
       //    - Tu propio doc
-      //    - O si sos del Staff (Ventas/Encargado/Admin) podés leer a cualquiera
+      //    - O si sos del Staff (Ventas/Encargado/Admin/Visor) podés leer a cualquiera
       allow read: if isAuthed() && (
         request.auth.uid == uid ||
         isEncargado() ||
         isVentas()    ||
+        isVisor()     ||
         isAdmin()
       );
 
@@ -249,8 +247,10 @@ service cloud.firestore {
           && (
             nuevoEstado() == "EN_PREPARACION" ||
             nuevoEstado() == "PREPARADO"      ||
-            // R8: operario puede reportar un error (encargado lo confirma antes de escalar a ventas)
-            (nuevoEstado() == "CON_ERROR" && resource.data.deposito == "R8")
+            // ISABELA: operario puede marcar CONTROLADO (preparación terminada) y reportar error
+            nuevoEstado() == "CONTROLADO"     ||
+            // Cualquier depósito: operario puede reportar error
+            nuevoEstado() == "CON_ERROR"
           );
       }
 
@@ -288,24 +288,33 @@ service cloud.firestore {
                          'canceladoAt', 'canceladoDesdeEstado', 'updatedAt', 'timestamps']);
       }
 
+      // Ventas puede reasignar depósito y método en pedidos que aún NO están preparados.
+      // También aplica a pedidos sin depósito (deposito == null → clasificación manual).
+      function canVentasReasignarDeposito() {
+        return isVentas()
+          && !(resource.data.estado in ["PREPARADO", "CONTROLADO", "DESPACHADO", "ENTREGADO", "CANCELADO", "ANULADO"])
+          && request.resource.data.diff(resource.data).changedKeys()
+               .hasOnly(['deposito', 'metodoEntrega', 'agencia', 'camionDestino', 'camionFechaStr',
+                         'updatedAt', 'reasignadoPor', 'reasignadoAt']);
+      }
+
       // **ÚNICO bloque operativo permitido**
       allow update: if isAuthed() && (
-        canEncargadoUpdate()       ||
-        canEncargadoCamionUpdate() ||
-        canOperarioUpdate()        ||
-        canVentasUpdate()          ||
-        canVentasUpdateRUT()       ||
-        canVentasCancel()          ||
+        canEncargadoUpdate()          ||
+        canEncargadoCamionUpdate()    ||
+        canOperarioUpdate()           ||
+        canVentasUpdate()             ||
+        canVentasUpdateRUT()          ||
+        canVentasCancel()             ||
+        canVentasReasignarDeposito()  ||
         canAdminOverride()
       );
 
       // Ventas borra pedidos del flujo normal.
-      // Encargado puede borrar pedidos DESPACHADOS de su depósito (fallback de migración:
-      // cuando el pedido quedó en colección `pedidos` con estado=DESPACHADO en vez de
-      // moverse a pedidos_despachados como corresponde).
+      // Encargado puede borrar pedidos de su depósito como fallback de migración
+      // (sin restricción de estado ni depósito exacto — la UI controla el acceso).
       allow delete: if request.auth != null && (
-        userRole() == "ventas" ||
-        (isEncargado() && resource.data.estado == "DESPACHADO" && resource.data.deposito == userDeposito())
+        isVentas() || isEncargado() || isAdmin()
       );
     }
 
@@ -354,6 +363,23 @@ service cloud.firestore {
       allow create: if isAuthed() && (isEncargado() || isVentas());
       allow update: if isAuthed() && (isEncargado() || isVentas());
       allow delete: if false;
+    }
+
+    // === PAGOS (datos de pago registrados al despachar) ===
+    match /pagos/{pedidoId} {
+      // Ventas, visor y admin pueden leer
+      allow read: if isAuthed() && (isVentas() || isVisor() || isAdmin());
+      // Ventas o admin crean el documento al despachar (desde PagoModal)
+      allow create: if isAuthed() && (isVentas() || isAdmin());
+      // Ventas puede editar tramos y historial; admin puede marcar registrado y editar todo
+      allow update: if isAuthed() && (
+        isAdmin() ||
+        (isVentas() && request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(['pagos', 'pago', 'pagoOrigen', 'pagoHistorial',
+                    'editadoAt', 'editadoPor', 'editadoPorNombre',
+                    'pagoEstado', 'pagoRegistradoAt', 'pagoRegistradoPor', 'pagoRegistradoPorNombre']))
+      );
+      allow delete: if isAuthed() && isAdmin();
     }
 
     // === PEDIDOS WEB (CLIENTES E-COMMERCE) ===

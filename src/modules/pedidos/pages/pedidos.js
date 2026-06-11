@@ -1,7 +1,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { listenPedidosByDeposito } from "../services/pedidosFS";
+import { useNavigate, Navigate } from "react-router-dom";
+import { listenPedidosByDeposito, asignarPedidoIsabela } from "../services/pedidosFS";
 import { useApp } from "../../../context/AppContext";
 import { useAuth } from "../../../context/AuthContext";
 import { syncPendientesDeHoy } from "../services/syncFinnegans";
@@ -169,6 +169,9 @@ export default function PedidosPage() {
   const { user, profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
+  // Guardia: visor y ventas no deben ver esta vista — los mandamos al pipeline
+  // Se hace con useEffect para no romper las Rules of Hooks (hay hooks después)
+
   const [pedidos, setPedidos] = useState([]);
   const [loadingPedidos, setLoadingPedidos] = useState(true);
 
@@ -192,15 +195,47 @@ export default function PedidosPage() {
   const [debouncedQ, setDebouncedQ] = useState(""); // para debounce suave
   const [syncing, setSyncing] = useState(false);
 
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
+  useEffect(() => {
+    const h = () => setIsMobile(window.innerWidth < 1024);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+
   const isEncargado = (profile?.rol || "").toLowerCase() === "encargado";
   const isVentas = (profile?.rol || "").toLowerCase() === "ventas";
-  const isEncargadoIsabela = isEncargado && profile?.deposito === "ISABELA";
-  const isEncargadoR8      = isEncargado && profile?.deposito === "R8";
+  const _depositoNorm = (profile?.deposito || "").trim().toUpperCase();
+  const isEncargadoIsabela = isEncargado && _depositoNorm === "ISABELA";
+  const isEncargadoR8      = isEncargado && _depositoNorm === "R8";
+
+  // ISABELA: lista de operarios del depósito para el panel de asignación
+  const [operariosIsabela, setOperariosIsabela] = useState([]);
+  const [asignando, setAsignando] = useState(null); // pedidoId en proceso de asignación
+  useEffect(() => {
+    if (!isEncargadoIsabela) return;
+    // Consultamos todos los usuarios de ISABELA y filtramos operarios en JS,
+    // soportando tanto "role" (campo viejo) como "rol" (campo nuevo).
+    const q = query(
+      collection(db, "users"),
+      where("deposito", "==", "ISABELA")
+    );
+    const unsub = onSnapshot(q, snap => {
+      const ops = snap.docs
+        .map(d => ({ uid: d.id, ...d.data() }))
+        .filter(u => {
+          const r = ((u.role || u.rol || "")).toLowerCase();
+          return r === "operario";
+        });
+      setOperariosIsabela(ops);
+    });
+    return () => unsub();
+  }, [isEncargadoIsabela]);
 
   // ISABELA + R8: pedidos despachados pendientes de entrega
   const [porControlar, setPorControlar]         = useState([]);  // ISABELA
   const [porControlarR8, setPorControlarR8]     = useState([]);  // R8
   const [yaEntregadosIds, setYaEntregadosIds]   = useState(new Set()); // ISABELA
+  const [yaEntregados, setYaEntregados] = useState([]); // ISABELA — objetos entregados HOY
   const [yaEntregadosIdsR8, setYaEntregadosIdsR8] = useState(new Set()); // R8
   const [collapsedEntrega, setCollapsedEntrega] = useState(false);
 
@@ -216,6 +251,17 @@ export default function PedidosPage() {
 
 
 
+
+  // Guardia de rol: visor y ventas van al pipeline, no a esta vista.
+  // Chequeamos ambos campos (role y rol) para cubrir perfiles con campos mixtos.
+  useEffect(() => {
+    if (!profile) return;
+    const rf = (profile.role || "").toLowerCase();
+    const rl = (profile.rol  || "").toLowerCase();
+    const isVisorUser  = rf === "visor"  || rl === "visor";
+    const isVentasUser = rf === "ventas" || rl === "ventas";
+    if (isVisorUser || isVentasUser) navigate("/pedidos", { replace: true });
+  }, [profile, navigate]);
 
   const seenRef = useRef({}); // { [estado]: epoch ms }
   useEffect(() => {
@@ -303,7 +349,14 @@ export default function PedidosPage() {
       where("deposito", "==", "ISABELA")
     );
     const unsub = onSnapshot(q, snap => {
-      setYaEntregadosIds(new Set(snap.docs.map(d => d.id)));
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setYaEntregadosIds(new Set(docs.map(d => d.id)));
+      // Solo HOY para el pipeline del encargado
+      const hoyMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+      setYaEntregados(docs.filter(d => {
+        const ts = d.entregadoAt?.seconds ? d.entregadoAt.seconds * 1000 : null;
+        return ts !== null && ts >= hoyMs;
+      }));
     }, err => console.error("[yaEntregados ISABELA]", err));
     return () => unsub();
   }, [isEncargadoIsabela]);
@@ -581,10 +634,14 @@ export default function PedidosPage() {
 
 
   // Estados ordenados y con total pre-calculado; se ocultan los que están vacíos
+  const activeEstadoOrder = isEncargadoIsabela
+    ? ["PENDIENTE_ASIGNAR", "ASIGNADO", "EN_PREPARACION", "CON_ERROR", "CONTROLADO"]
+    : ESTADO_ORDER;
+
   const estadosOrdenados = useMemo(() => {
     const out = [];
 
-    for (const est of ESTADO_ORDER) {
+    for (const est of activeEstadoOrder) {
       const porFecha = gruposConDesp[est];
       if (!porFecha) continue;
 
@@ -593,14 +650,14 @@ export default function PedidosPage() {
     }
 
     for (const est of Object.keys(gruposConDesp)) {
-      if (ESTADO_ORDER.includes(est)) continue;
+      if (activeEstadoOrder.includes(est)) continue;
       const porFecha = gruposConDesp[est];
       const total = Object.values(porFecha).reduce((a, arr) => a + arr.length, 0);
       if (total > 0) out.push([est, porFecha, total]);
     }
 
     return out;
-  }, [gruposConDesp]);
+  }, [gruposConDesp, activeEstadoOrder]);
 
 
 
@@ -612,8 +669,9 @@ export default function PedidosPage() {
 
     if (isEncargadoIsabela) {
       // ISABELA: DESPACHADO ya se muestra en sección propia
-      accionStates    = ["PENDIENTE_ASIGNAR"];
-      ejecucionStates = ["EN_PREPARACION", "CONTROLADO"];
+      accionStates    = ["PENDIENTE_ASIGNAR", "CON_ERROR"];
+      ejecucionStates = ["ASIGNADO", "EN_PREPARACION"];
+      // CONTROLADO → "otros" (aparece abajo sin zona, listo para despachar)
     } else if (isEncargadoR8) {
       // R8: encargado actúa en: asignar operarios, revisar errores, controlar pedidos preparados
       accionStates    = ["PENDIENTE_ASIGNAR", "CON_ERROR", "PREPARADO"];
@@ -790,6 +848,111 @@ export default function PedidosPage() {
           )}
         </div>
       </a>
+    );
+  }
+
+  // ── Panel de asignación ISABELA ───────────────────────────────────────────
+  // Solo visible para el encargado de ISABELA en tarjetas PENDIENTE_ASIGNAR y ASIGNADO.
+  function renderAsignarPanel(p) {
+    const esPendiente = p.estado === "PENDIENTE_ASIGNAR";
+    const esAsignado  = p.estado === "ASIGNADO";
+    if (!isEncargadoIsabela || (!esPendiente && !esAsignado)) return null;
+
+    const loading = asignando === p.id;
+
+    async function handleAsignar(operario) {
+      setAsignando(p.id);
+      try {
+        await asignarPedidoIsabela(p.id, operario.uid, operario.nombre || operario.displayName || "Operario", false);
+        toast.success(`Asignado a ${operario.nombre || "operario"} ✓`);
+      } catch (e) {
+        toast.error("No se pudo asignar: " + (e?.message || "error"));
+      } finally {
+        setAsignando(null);
+      }
+    }
+
+    async function handleSelfAssign() {
+      setAsignando(p.id);
+      try {
+        await asignarPedidoIsabela(p.id, user.uid, profile?.nombre || profile?.displayName || "Encargado", true);
+        toast.success("Pedido tomado, comenzando preparación ✓");
+      } catch (e) {
+        toast.error("No se pudo asignar: " + (e?.message || "error"));
+      } finally {
+        setAsignando(null);
+      }
+    }
+
+    async function handleReasignar() {
+      // Volver a PENDIENTE_ASIGNAR para re-seleccionar
+      setAsignando(p.id);
+      try {
+        await updateDoc(doc(db, "pedidos", p.id), {
+          estado: "PENDIENTE_ASIGNAR",
+          operarioId: null,
+          operarioNombre: null,
+          updatedAt: serverTimestamp(),
+          "timestamps.PENDIENTE_ASIGNAR": serverTimestamp(),
+        });
+        toast.success("Asignación liberada");
+      } catch (e) {
+        toast.error("Error: " + (e?.message || "error"));
+      } finally {
+        setAsignando(null);
+      }
+    }
+
+    if (esAsignado) {
+      return (
+        <div style={{ marginTop: "6px", padding: "7px 10px", background: "#f5f3ff", borderRadius: "8px", border: "1px solid #c4b5fd" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "0.78rem", color: "#5b21b6", flex: 1, fontWeight: 600 }}>
+              👤 {p.operarioNombre || "Operario"}
+            </span>
+            <button
+              onClick={e => { e.stopPropagation(); e.preventDefault(); handleReasignar(); }}
+              disabled={loading}
+              style={{ fontSize: "0.68rem", padding: "3px 9px", borderRadius: "6px", border: "1px solid #c4b5fd", background: "#fff", color: "#7c3aed", cursor: "pointer", fontWeight: 600 }}
+            >
+              {loading ? "…" : "Reasignar"}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // PENDIENTE_ASIGNAR
+    return (
+      <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "5px" }} onClick={e => { e.stopPropagation(); e.preventDefault(); }}>
+        {operariosIsabela.map(op => (
+          <button
+            key={op.uid}
+            onClick={() => handleAsignar(op)}
+            disabled={loading}
+            style={{
+              padding: "7px 10px", borderRadius: "8px",
+              border: "1.5px solid #c4b5fd", background: "#f5f3ff",
+              color: "#5b21b6", fontSize: "0.78rem", fontWeight: 700,
+              cursor: "pointer", textAlign: "left",
+            }}
+          >
+            {loading ? "…" : `👤 Asignar a ${op.nombre || op.displayName || "Operario"}`}
+          </button>
+        ))}
+        <button
+          onClick={handleSelfAssign}
+          disabled={loading}
+          style={{
+            padding: "7px 10px", borderRadius: "8px",
+            border: "1.5px solid #bae6fd", background: "#f0f9ff",
+            color: "#0369a1", fontSize: "0.78rem", fontWeight: 700,
+            cursor: "pointer", textAlign: "left",
+          }}
+        >
+          {loading ? "…" : "🙋 Preparar yo mismo"}
+        </button>
+      </div>
     );
   }
 
@@ -1073,178 +1236,67 @@ export default function PedidosPage() {
       </div>
 
       {/* ── Contenido ── */}
+      {isEncargadoIsabela && !isMobile ? (
+        /* ── ISABELA Desktop: Kanban horizontal ── */
+        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(7, minmax(200px, 1fr))", gap: "10px", padding: "14px 16px 24px", overflowX: "auto", alignItems: "start", boxSizing: "border-box" }}>
+          {FLUJO_ISABELA.map(cfg => {
+            // Get items for this state
+            let items = [];
+            if (cfg.id === "DESP_PENDIENTE") {
+              items = pendientesEntrega;
+            } else if (cfg.id === "DESP_ENTREGADO") {
+              items = yaEntregados;
+            } else {
+              const porFecha = gruposConDesp[cfg.id];
+              if (porFecha) {
+                items = ["HOY","AYER","ÚLTIMA SEMANA","ÚLTIMO MES","ANTERIORES"].flatMap(b => porFecha[b] || []);
+              }
+            }
+
+            return (
+              <div key={cfg.id} style={{ display: "flex", flexDirection: "column", background: cfg.bg, borderRadius: "12px", border: `1.5px solid ${cfg.border}`, minHeight: "120px", overflow: "hidden" }}>
+                {/* Column header */}
+                <div style={{ padding: "10px 13px 8px", borderBottom: `1px solid ${cfg.border}`, background: cfg.headerBg }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span style={{ fontSize: "0.9rem" }}>{cfg.icon}</span>
+                    <span style={{ flex: 1, fontWeight: 700, fontSize: "0.78rem", color: cfg.color }}>{cfg.label}</span>
+                    <span style={{ background: items.length > 0 ? cfg.color + "22" : "#f1f5f9", color: items.length > 0 ? cfg.color : "#94a3b8", fontSize: "0.7rem", fontWeight: 700, padding: "1px 7px", borderRadius: "999px" }}>
+                      {items.length}
+                    </span>
+                  </div>
+                </div>
+                {/* Cards */}
+                <div style={{ padding: "8px", flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
+                  {items.length === 0 ? (
+                    <p style={{ textAlign: "center", color: "#d1d5db", fontSize: "0.75rem", padding: "14px 0", margin: 0 }}>Sin pedidos</p>
+                  ) : (cfg.id === "DESP_PENDIENTE" ? (
+                    items.map(p => (
+                      <div key={p.id} onClick={() => navigate(`/encargado/entrega/${p.id}`)} style={{ background: "#fff", border: "1.5px solid #fecaca", borderLeft: "4px solid #dc2626", borderRadius: "10px", padding: "10px 12px", cursor: "pointer" }}>
+                        <div style={{ fontWeight: 700, fontSize: "0.85rem", color: "#0f172a" }}>#{p.numero || p.id}</div>
+                        <div style={{ fontSize: "0.78rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.cliente || "—"}</div>
+                        <div style={{ fontSize: "0.7rem", color: "#dc2626", fontWeight: 700, marginTop: "4px" }}>Controlar →</div>
+                      </div>
+                    ))
+                  ) : cfg.id === "DESP_ENTREGADO" ? (
+                    items.map(p => (
+                      <div key={p.id} style={{ background: "#fff", border: "1.5px solid #86efac", borderRadius: "10px", padding: "10px 12px" }}>
+                        <div style={{ fontWeight: 700, fontSize: "0.85rem", color: "#0f172a" }}>#{p.numero || p.id}</div>
+                        <div style={{ fontSize: "0.78rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.cliente || "—"}</div>
+                        <div style={{ fontSize: "0.7rem", color: "#15803d", fontWeight: 600, marginTop: "4px" }}>✓ Entregado</div>
+                      </div>
+                    ))
+                  ) : (
+                    items.map(p => renderCard(p))
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+      /* ── Mobile / R8: secciones verticales ── */
       <div style={{ padding: "10px 10px 80px" }}>
 
-        {/* ── ISABELA: pendientes de entrega (colapsable) ── */}
-        {isEncargadoIsabela && pendientesEntrega.length > 0 && (
-          <div style={{ marginBottom: "10px" }}>
-            {/* Header colapsable */}
-            <button
-              type="button"
-              onClick={() => setCollapsedEntrega(c => !c)}
-              style={{
-                width: "100%", display: "flex", alignItems: "center", gap: "10px",
-                padding: "13px 16px",
-                background: collapsedEntrega ? "#fff" : "#fef2f2",
-                border: `1.5px solid ${collapsedEntrega ? "#e2e8f0" : "#fca5a5"}`,
-                borderRadius: collapsedEntrega ? "14px" : "14px 14px 0 0",
-                cursor: "pointer", textAlign: "left",
-                transition: "all 0.15s ease",
-              }}
-            >
-              <span style={{ fontSize: "1rem", lineHeight: 1, flexShrink: 0 }}>
-                {ESTADO_CONFIG_ISABELA.DESP_PENDIENTE?.icon || "🚚"}
-              </span>
-              <span style={{ flex: 1, fontWeight: 700, fontSize: "0.88rem", color: "#dc2626" }}>
-                {ESTADO_CONFIG_ISABELA.DESP_PENDIENTE?.label || "Despachado · entregar"}
-              </span>
-              <span style={{
-                flexShrink: 0,
-                background: "#dc262622",
-                color: "#dc2626",
-                fontSize: "0.78rem", fontWeight: 700,
-                padding: "2px 9px", borderRadius: "999px",
-              }}>
-                {pendientesEntrega.length}
-              </span>
-              <span style={{ fontSize: "0.75rem", color: "#dc2626", flexShrink: 0, marginLeft: "2px" }}>
-                {collapsedEntrega ? "▶" : "▼"}
-              </span>
-            </button>
-
-            {/* Lista de pedidos (colapsable) */}
-            {!collapsedEntrega && (
-              <div style={{
-                border: "1.5px solid #fca5a5", borderTop: "none",
-                borderRadius: "0 0 14px 14px",
-                background: "#fef2f2",
-                padding: "8px 10px 10px",
-              }}>
-                {pendientesEntrega.map(p => {
-                  const despachadoAgo = formatTimeAgo(
-                    p.despachadoAt || p.timestamps?.DESPACHADO || p.updatedAt
-                  );
-                  return (
-                    <div
-                      key={p.id}
-                      onClick={() => navigate(`/encargado/entrega/${p.id}`)}
-                      style={{
-                        background: "#fff", border: "1.5px solid #fecaca",
-                        borderLeft: "4px solid #dc2626",
-                        borderRadius: "10px", padding: "11px 14px", marginBottom: "6px",
-                        display: "flex", alignItems: "center", gap: "12px", cursor: "pointer",
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "2px" }}>
-                          <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>
-                            #{p.numero || p.id}
-                          </p>
-                          {despachadoAgo && (
-                            <span style={{ fontSize: "0.7rem", color: "#94a3b8", fontWeight: 500 }}>
-                              ⏱ {despachadoAgo}
-                            </span>
-                          )}
-                        </div>
-                        <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {p.cliente || "—"}
-                        </p>
-                        {p.metodoEntrega && (
-                          <span style={{ fontSize: "0.7rem", color: "#64748b" }}>🚚 {p.metodoEntrega}</span>
-                        )}
-                      </div>
-                      <span style={{ flexShrink: 0, color: "#dc2626", fontSize: "0.8rem", fontWeight: 700 }}>
-                        Controlar →
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── R8: pendientes de entrega (colapsable) ── */}
-        {isEncargadoR8 && pendientesEntregaR8.length > 0 && (
-          <div style={{ marginBottom: "10px" }}>
-            <button
-              type="button"
-              onClick={() => setCollapsedEntrega(c => !c)}
-              style={{
-                width: "100%", display: "flex", alignItems: "center", gap: "10px",
-                padding: "13px 16px",
-                background: collapsedEntrega ? "#fff" : "#fff7ed",
-                border: `1.5px solid ${collapsedEntrega ? "#e2e8f0" : "#fdba74"}`,
-                borderRadius: collapsedEntrega ? "14px" : "14px 14px 0 0",
-                cursor: "pointer", textAlign: "left",
-                transition: "all 0.15s ease",
-              }}
-            >
-              <span style={{ fontSize: "1rem", lineHeight: 1, flexShrink: 0 }}>🚚</span>
-              <span style={{ flex: 1, fontWeight: 700, fontSize: "0.88rem", color: "#b45309" }}>
-                Despachado · entregar
-              </span>
-              <span style={{
-                flexShrink: 0, background: "#b4530922", color: "#b45309",
-                fontSize: "0.78rem", fontWeight: 700, padding: "2px 9px", borderRadius: "999px",
-              }}>
-                {pendientesEntregaR8.length}
-              </span>
-              <span style={{ fontSize: "0.75rem", color: "#b45309", flexShrink: 0, marginLeft: "2px" }}>
-                {collapsedEntrega ? "▶" : "▼"}
-              </span>
-            </button>
-
-            {!collapsedEntrega && (
-              <div style={{
-                border: "1.5px solid #fdba74", borderTop: "none",
-                borderRadius: "0 0 14px 14px",
-                background: "#fff7ed",
-                padding: "8px 10px 10px",
-              }}>
-                {pendientesEntregaR8.map(p => {
-                  const despachadoAgo = formatTimeAgo(
-                    p.despachadoAt || p.timestamps?.DESPACHADO || p.updatedAt
-                  );
-                  return (
-                    <div
-                      key={p.id}
-                      onClick={() => navigate(`/encargado/entrega/${p.id}`)}
-                      style={{
-                        background: "#fff", border: "1.5px solid #fed7aa",
-                        borderLeft: "4px solid #b45309",
-                        borderRadius: "10px", padding: "11px 14px", marginBottom: "6px",
-                        display: "flex", alignItems: "center", gap: "12px", cursor: "pointer",
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "2px" }}>
-                          <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>
-                            #{p.numero || p.id}
-                          </p>
-                          {despachadoAgo && (
-                            <span style={{ fontSize: "0.7rem", color: "#94a3b8", fontWeight: 500 }}>
-                              ⏱ {despachadoAgo}
-                            </span>
-                          )}
-                        </div>
-                        <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {p.cliente || "—"}
-                        </p>
-                        {p.metodoEntrega && (
-                          <span style={{ fontSize: "0.7rem", color: "#64748b" }}>🚚 {p.metodoEntrega}</span>
-                        )}
-                      </div>
-                      <span style={{ flexShrink: 0, color: "#b45309", fontSize: "0.8rem", fontWeight: 700 }}>
-                        Entregar →
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
 
         {loadingPedidos && (
           <div style={{ textAlign: "center", padding: "48px 0", color: "#94a3b8", fontSize: "0.9rem" }}>
@@ -1258,14 +1310,88 @@ export default function PedidosPage() {
           </div>
         )}
 
-        {/* Encargado: zonas operativas */}
-        {!loadingPedidos && isEncargado && zonasEncargado && (
+        {/* ── ISABELA encargado: orden lineal del flujo ── */}
+        {!loadingPedidos && isEncargadoIsabela && (
+          <>
+            {estadosOrdenados.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
+
+            {/* DESP_PENDIENTE al final (último paso del flujo) */}
+            {pendientesEntrega.length > 0 && (
+              <div style={{ marginBottom: "10px", marginTop: "6px" }}>
+                <button
+                  type="button"
+                  onClick={() => setCollapsedEntrega(c => !c)}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: "10px",
+                    padding: "13px 16px",
+                    background: collapsedEntrega ? "#fff" : "#fef2f2",
+                    border: `1.5px solid ${collapsedEntrega ? "#e2e8f0" : "#fca5a5"}`,
+                    borderRadius: collapsedEntrega ? "14px" : "14px 14px 0 0",
+                    cursor: "pointer", textAlign: "left",
+                  }}
+                >
+                  <span style={{ fontSize: "1rem", lineHeight: 1, flexShrink: 0 }}>🚚</span>
+                  <span style={{ flex: 1, fontWeight: 700, fontSize: "0.88rem", color: "#dc2626" }}>
+                    Despachado · entregar
+                  </span>
+                  <span style={{ flexShrink: 0, background: "#dc262622", color: "#dc2626", fontSize: "0.78rem", fontWeight: 700, padding: "2px 9px", borderRadius: "999px" }}>
+                    {pendientesEntrega.length}
+                  </span>
+                  <span style={{ fontSize: "0.75rem", color: "#dc2626", flexShrink: 0, marginLeft: "2px" }}>
+                    {collapsedEntrega ? "▶" : "▼"}
+                  </span>
+                </button>
+                {!collapsedEntrega && (
+                  <div style={{ border: "1.5px solid #fca5a5", borderTop: "none", borderRadius: "0 0 14px 14px", background: "#fef2f2", padding: "8px 10px 10px" }}>
+                    {pendientesEntrega.map(p => {
+                      const ago = formatTimeAgo(p.despachadoAt || p.timestamps?.DESPACHADO || p.updatedAt);
+                      return (
+                        <div key={p.id} onClick={() => navigate(`/encargado/entrega/${p.id}`)}
+                          style={{ background: "#fff", border: "1.5px solid #fecaca", borderLeft: "4px solid #dc2626", borderRadius: "10px", padding: "11px 14px", marginBottom: "6px", display: "flex", alignItems: "center", gap: "12px", cursor: "pointer" }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>#{p.numero || p.id}</p>
+                            {ago && <span style={{ fontSize: "0.7rem", color: "#94a3b8" }}>⏱ {ago}</span>}
+                            <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.cliente || "—"}</p>
+                          </div>
+                          <span style={{ flexShrink: 0, color: "#dc2626", fontSize: "0.8rem", fontWeight: 700 }}>Controlar →</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* DESP_ENTREGADO al final */}
+            <div style={{ marginBottom: "10px" }}>
+              <div style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", padding: "13px 16px", background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: yaEntregados.length > 0 ? "14px 14px 0 0" : "14px" }}>
+                <span style={{ fontSize: "1rem", lineHeight: 1, flexShrink: 0 }}>✅</span>
+                <span style={{ flex: 1, fontWeight: 700, fontSize: "0.88rem", color: "#15803d" }}>Entregado hoy</span>
+                <span style={{ flexShrink: 0, background: "#15803d22", color: "#15803d", fontSize: "0.78rem", fontWeight: 700, padding: "2px 9px", borderRadius: "999px" }}>{yaEntregados.length}</span>
+              </div>
+              {yaEntregados.length > 0 && (
+                <div style={{ border: "1.5px solid #86efac", borderTop: "none", borderRadius: "0 0 14px 14px", background: "#f0fdf4", padding: "8px 10px 10px" }}>
+                  {yaEntregados.map(p => (
+                    <div key={p.id} style={{ background: "#fff", border: "1.5px solid #86efac", borderRadius: "10px", padding: "11px 14px", marginBottom: "6px", display: "flex", alignItems: "center", gap: "12px" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>#{p.numero || p.id}</p>
+                        <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.cliente || "—"}</p>
+                      </div>
+                      <span style={{ flexShrink: 0, color: "#15803d", fontSize: "0.8rem", fontWeight: 700 }}>✓ Entregado</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* R8 encargado: zonas operativas */}
+        {!loadingPedidos && isEncargadoR8 && zonasEncargado && (
           <>
             {zonasEncargado.accion.length > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", marginTop: "4px" }}>
-                <span style={{ fontSize: "0.67rem", fontWeight: 700, color: "#dc2626", letterSpacing: "0.07em", textTransform: "uppercase" }}>
-                  ⚡ Requiere tu acción
-                </span>
+                <span style={{ fontSize: "0.67rem", fontWeight: 700, color: "#dc2626", letterSpacing: "0.07em", textTransform: "uppercase" }}>⚡ Requiere tu acción</span>
                 <span style={{ background: "#fee2e2", color: "#dc2626", fontSize: "0.68rem", fontWeight: 700, padding: "1px 8px", borderRadius: "999px" }}>
                   {zonasEncargado.accion.reduce((s, [,,t]) => s + t, 0)}
                 </span>
@@ -1275,9 +1401,7 @@ export default function PedidosPage() {
 
             {zonasEncargado.ejecucion.length > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", marginTop: "14px" }}>
-                <span style={{ fontSize: "0.67rem", fontWeight: 700, color: "#7c3aed", letterSpacing: "0.07em", textTransform: "uppercase" }}>
-                  ⚙️ En ejecución
-                </span>
+                <span style={{ fontSize: "0.67rem", fontWeight: 700, color: "#7c3aed", letterSpacing: "0.07em", textTransform: "uppercase" }}>⚙️ En ejecución</span>
                 <span style={{ background: "#ede9fe", color: "#7c3aed", fontSize: "0.68rem", fontWeight: 700, padding: "1px 8px", borderRadius: "999px" }}>
                   {zonasEncargado.ejecucion.reduce((s, [,,t]) => s + t, 0)}
                 </span>
@@ -1290,13 +1414,45 @@ export default function PedidosPage() {
                 {zonasEncargado.otros.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
               </div>
             )}
+
+            {/* R8: pendientes de entrega */}
+            {pendientesEntregaR8.length > 0 && (
+              <div style={{ marginBottom: "10px", marginTop: "6px" }}>
+                <button type="button" onClick={() => setCollapsedEntrega(c => !c)}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", padding: "13px 16px", background: collapsedEntrega ? "#fff" : "#fff7ed", border: `1.5px solid ${collapsedEntrega ? "#e2e8f0" : "#fdba74"}`, borderRadius: collapsedEntrega ? "14px" : "14px 14px 0 0", cursor: "pointer", textAlign: "left" }}>
+                  <span style={{ fontSize: "1rem", lineHeight: 1, flexShrink: 0 }}>🚚</span>
+                  <span style={{ flex: 1, fontWeight: 700, fontSize: "0.88rem", color: "#b45309" }}>Despachado · entregar</span>
+                  <span style={{ flexShrink: 0, background: "#b4530922", color: "#b45309", fontSize: "0.78rem", fontWeight: 700, padding: "2px 9px", borderRadius: "999px" }}>{pendientesEntregaR8.length}</span>
+                  <span style={{ fontSize: "0.75rem", color: "#b45309", flexShrink: 0, marginLeft: "2px" }}>{collapsedEntrega ? "▶" : "▼"}</span>
+                </button>
+                {!collapsedEntrega && (
+                  <div style={{ border: "1.5px solid #fdba74", borderTop: "none", borderRadius: "0 0 14px 14px", background: "#fff7ed", padding: "8px 10px 10px" }}>
+                    {pendientesEntregaR8.map(p => {
+                      const ago = formatTimeAgo(p.despachadoAt || p.timestamps?.DESPACHADO || p.updatedAt);
+                      return (
+                        <div key={p.id} onClick={() => navigate(`/encargado/entrega/${p.id}`)}
+                          style={{ background: "#fff", border: "1.5px solid #fed7aa", borderLeft: "4px solid #b45309", borderRadius: "10px", padding: "11px 14px", marginBottom: "6px", display: "flex", alignItems: "center", gap: "12px", cursor: "pointer" }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>#{p.numero || p.id}</p>
+                            {ago && <span style={{ fontSize: "0.7rem", color: "#94a3b8" }}>⏱ {ago}</span>}
+                            <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.cliente || "—"}</p>
+                          </div>
+                          <span style={{ flexShrink: 0, color: "#b45309", fontSize: "0.8rem", fontWeight: 700 }}>Controlar →</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
 
-        {/* Otros roles: lista plana */}
+        {/* Otros roles (no encargado): lista plana */}
         {!loadingPedidos && !isEncargado &&
           estadosOrdenados.map(([e, pf, t]) => renderEstadoSection(e, pf, t))}
       </div>
+      )}
     </div>
   );
 }

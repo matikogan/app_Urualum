@@ -2,11 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { useApp } from "../../../context/AppContext";
-import { getPedido, asignarOperario, updateEstado, cancelarPedido } from "../services/pedidosFS";
+import { getPedido, asignarOperario, updateEstado, cancelarPedido, asignarPedidoIsabela } from "../services/pedidosFS";
 import { ESTADOS } from "../services/estados";
 import { getFlag } from "../services/featureFlags";
 import { db } from "../../../firebase";
-import { doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, serverTimestamp, onSnapshot } from "firebase/firestore";
 import { getCatalogoByCodUru } from "../services/catalogo";
 import VolverListaPedidos from "../components/VolverListaPedidos";
 
@@ -19,7 +19,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { despacharPedido } from "../services/despachoFS";
 
 import ConfirmarDespacho from "./confirmarDespacho";
-import PagoModal, { resumenPago } from "../components/PagoModal";
+
 
 
 
@@ -521,9 +521,15 @@ export default function PedidoDetalle() {
   const { haptics, toast } = useApp();
   const { user, profile } = useAuth();
 
-  const role = (profile?.rol || "").toLowerCase();
-  const isVentas = role === "ventas";
+  // Chequeamos ambos campos para cubrir perfiles con role/rol mixtos (ej: encargado viejo + visor nuevo)
+  const _roleField = (profile?.role || "").toLowerCase();
+  const _rolField  = (profile?.rol  || "").toLowerCase();
+  const role      = _roleField || _rolField;
+  const isVisor   = _roleField === "visor" || _rolField === "visor";
+  const isVentas  = role === "ventas" || isVisor;
   const isEncargado = role === "encargado";
+  // soloLectura: el visor puede ver todo pero no actuar (despachar, cancelar, etc.)
+  const soloLectura = isVisor;
 
   
 
@@ -535,12 +541,11 @@ export default function PedidoDetalle() {
 
 
   function handleBack() {
-    // Si el usuario es de ventas, forzamos la lista de "CONTROLADOS" de ventas
-    if (isVentas) {
-      navigate("/ventas/para-despachar", { replace: true });
-      return;
-    }
-    // Para otros roles (encargado/operario), podés ajustar esta ruta si tu app usa otra
+    // El visor viene del pipeline
+    if (isVisor) { navigate("/pedidos", { replace: true }); return; }
+    // Ventas va a su lista de controlados
+    if (isVentas) { navigate("/ventas/para-despachar", { replace: true }); return; }
+    // Encargado / operario
     navigate("/encargado/pedidos", { replace: true });
   }
 
@@ -559,6 +564,21 @@ export default function PedidoDetalle() {
   const isSelfAssigned = !!pedido?.operarioId && pedido.operarioId === user?.uid;
   // ISABELA: encargado único que hace todo
   const isIsabela = isEncargado && profile?.deposito === "ISABELA";
+
+  // ISABELA: operarios disponibles para asignar (se cargan cuando el pedido está en PENDIENTE_ASIGNAR)
+  const [operariosIsabela, setOperariosIsabela] = useState([]);
+  useEffect(() => {
+    if (!isIsabela) return;
+    const q = query(collection(db, "users"), where("deposito", "==", "ISABELA"));
+    const unsub = onSnapshot(q, snap => {
+      setOperariosIsabela(
+        snap.docs
+          .map(d => ({ uid: d.id, ...d.data() }))
+          .filter(u => ((u.role || u.rol || "")).toLowerCase() === "operario")
+      );
+    });
+    return () => unsub();
+  }, [isIsabela]);
 
   // selector de operario
   const [operarios, setOperarios] = useState([]);
@@ -589,17 +609,14 @@ export default function PedidoDetalle() {
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const [savingAnulacion, setSavingAnulacion] = useState(false);
 
-  // Estado para el modal de pago (ventas)
-  const [showPagoModal, setShowPagoModal] = useState(false);
-  // El pedido local se actualiza optimísticamente tras guardar el pago
-  const [pagoLocal, setPagoLocal] = useState(null); // null = usar pedido.pago
-
   // Estados para el modal de cancelación (ventas)
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelStep, setCancelStep] = useState(1); // 1=elegir motivo, 2=confirmar
   const [cancelMotivo, setCancelMotivo] = useState("");
   const [cancelOtroText, setCancelOtroText] = useState("");
   const [canceling, setCanceling] = useState(false);
+  // Pago registrado para este pedido (si existe)
+  const [pagoInfo, setPagoInfo] = useState(null);
 
 
 
@@ -765,6 +782,19 @@ export default function PedidoDetalle() {
     toast.info("Luego conectamos este botón al registro de incidentes.");
   }
 
+
+  // ── Cargar pago para este pedido (si existe) ──
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "pagos", id));
+        if (!cancelled) setPagoInfo(snap.exists() ? snap.data() : null);
+      } catch { /* sin pago o sin permiso — silencioso */ }
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
 
   // flag lite (seguro)
   useEffect(() => {
@@ -1026,7 +1056,7 @@ const filteredOperarios = useMemo(() => {
   // ── Helpers de cancelación (ventas) ──────────────────────────────────────
   // Se llaman desde cualquier early-return que ventas pueda ver
   const ESTADOS_NO_CANCELABLES = ["CANCELADO", "ANULADO", "ENTREGADO", "DESPACHADO"];
-  const puedeVentasCancelar = isVentas && !ESTADOS_NO_CANCELABLES.includes(pedido?.estado);
+  const puedeVentasCancelar = isVentas && !soloLectura && !ESTADOS_NO_CANCELABLES.includes(pedido?.estado);
 
   function abrirCancelModal() {
     setCancelStep(1);
@@ -1320,14 +1350,36 @@ const filteredOperarios = useMemo(() => {
               })}
             </div>
           </div>
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 16px 20px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)" }}>
+          {/* ── CTA: asignar a operario o autoasignarse ── */}
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 16px 20px", background: "#fff", borderTop: "1px solid #e2e8f0", boxShadow: "0 -4px 16px rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", gap: "8px" }}>
+            {/* Un botón por cada operario de ISABELA */}
+            {operariosIsabela.map(op => (
+              <button
+                key={op.uid}
+                type="button"
+                disabled={saving}
+                onClick={async () => {
+                  try {
+                    setSaving(true);
+                    await asignarPedidoIsabela(id, op.uid, op.nombre || op.displayName || "Operario", false);
+                    toast.success(`Asignado a ${op.nombre || "operario"} ✓`);
+                    setPedido(prev => prev ? { ...prev, estado: "ASIGNADO", operarioId: op.uid, operarioNombre: op.nombre || op.displayName || "Operario" } : prev);
+                  } catch (e) { toast.error(e.message || "Error al asignar"); }
+                  finally { setSaving(false); }
+                }}
+                style={{ width: "100%", padding: "15px", borderRadius: "14px", border: "1.5px solid #c4b5fd", fontWeight: 700, fontSize: "1rem", background: saving ? "#f5f3ff" : "#ede9fe", color: saving ? "#a78bfa" : "#5b21b6", cursor: saving ? "not-allowed" : "pointer" }}
+              >
+                {saving ? "…" : `👤 Asignar a ${op.nombre || op.displayName || "Operario"}`}
+              </button>
+            ))}
+            {/* Autoasignarse: encargado lo hace él mismo */}
             <button
               type="button"
               onClick={handleTomarYPreparar}
               disabled={saving}
-              style={{ width: "100%", padding: "16px", borderRadius: "14px", border: "none", fontWeight: 700, fontSize: "1.05rem", background: saving ? "#e2e8f0" : "#16a34a", color: saving ? "#94a3b8" : "#fff", cursor: saving ? "not-allowed" : "pointer" }}
+              style={{ width: "100%", padding: "15px", borderRadius: "14px", border: "none", fontWeight: 700, fontSize: "1rem", background: saving ? "#e2e8f0" : "#16a34a", color: saving ? "#94a3b8" : "#fff", cursor: saving ? "not-allowed" : "pointer" }}
             >
-              {saving ? "Iniciando…" : "🟢 Comenzar preparación"}
+              {saving ? "Iniciando…" : "🙋 Preparar yo mismo"}
             </button>
           </div>
         </div>
@@ -2821,7 +2873,7 @@ const filteredOperarios = useMemo(() => {
         <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "14px 20px", position: "sticky", top: 0, zIndex: 10 }}>
           <div style={{ maxWidth: "860px", margin: "0 auto", display: "flex", alignItems: "center", gap: "12px" }}>
             <button
-              onClick={() => navigate("/ventas/para-despachar")}
+              onClick={() => navigate(isVisor ? "/pedidos" : "/ventas/para-despachar")}
               style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "34px", height: "34px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem", flexShrink: 0 }}
             >
               ←
@@ -2988,7 +3040,7 @@ const filteredOperarios = useMemo(() => {
         <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "14px 20px", position: "sticky", top: 0, zIndex: 10 }}>
           <div style={{ maxWidth: "760px", margin: "0 auto", display: "flex", alignItems: "center", gap: "12px" }}>
             <button
-              onClick={() => navigate(isVentas ? "/ventas/para-despachar" : "/pedidos")}
+              onClick={() => navigate(isVisor ? "/pedidos" : isVentas ? "/ventas/para-despachar" : "/pedidos")}
               style={{ width: "34px", height: "34px", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem", flexShrink: 0 }}>
               ←
             </button>
@@ -3192,7 +3244,7 @@ const filteredOperarios = useMemo(() => {
           <div style={{ maxWidth: "1200px", margin: "0 auto", display: "flex", alignItems: "center", gap: "14px" }}>
             <button
               type="button"
-              onClick={() => navigate("/ventas/pipeline")}
+              onClick={() => navigate(isVisor ? "/pedidos" : "/ventas/pipeline")}
               style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "34px", height: "34px", flexShrink: 0, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem" }}
             >
               ←
@@ -3205,6 +3257,7 @@ const filteredOperarios = useMemo(() => {
               {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
               {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🚚 {pedido.metodoEntrega}</span>}
               {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🏭 {pedido.deposito}</span>}
+              {pagoInfo && <span style={{ fontSize: "0.72rem", fontWeight: 700, background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "6px", padding: "3px 9px", color: "#15803d" }}>💳 Pagado</span>}
               <span style={{ background: "#ede9fe", color: "#5b21b6", fontSize: "0.68rem", fontWeight: 700, padding: "3px 10px", borderRadius: "999px", letterSpacing: "0.05em" }}>LISTO P/ DESPACHO</span>
               {renderVentasCancelBtn()}
             </div>
@@ -3343,10 +3396,18 @@ const filteredOperarios = useMemo(() => {
               ))}
             </div>
 
-            {/* CTA: Despachar */}
-            <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 18px" }}>
-              <ConfirmarDespacho pedidoId={id} compact />
-            </div>
+            {/* CTA: Despachar — oculto para soloLectura */}
+            {soloLectura ? (
+              <div style={{ background: "#f8fafc", border: "1.5px dashed #e2e8f0", borderRadius: "14px", padding: "14px 18px", textAlign: "center" }}>
+                <p style={{ margin: 0, fontSize: "0.78rem", color: "#94a3b8" }}>
+                  🔒 Vista de solo lectura — sin acciones disponibles
+                </p>
+              </div>
+            ) : (
+              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 18px" }}>
+                <ConfirmarDespacho pedidoId={id} compact />
+              </div>
+            )}
 
             {/* Cancelar pedido */}
             {puedeVentasCancelar && (
@@ -3402,16 +3463,13 @@ const filteredOperarios = useMemo(() => {
     if (isVentas) {
       // ── Desktop-first para ventas ──────────────────────────────────────────
       const operarioNombre = pedido.operarioNombre || "—";
-      const pagoActual     = pedido.pago || null;
-      const pagoHistorial  = pedido.pagoHistorial || [];
-      const coleccionPago  = pedido._source === "entregados" ? "pedidos_entregados" : "pedidos_despachados";
 
       return (
         <div style={{ background: "#f1f5f9", minHeight: "100vh" }}>
           {/* Header sticky */}
           <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 24px", position: "sticky", top: 0, zIndex: 10 }}>
             <div style={{ maxWidth: "1200px", margin: "0 auto", display: "flex", alignItems: "center", gap: "14px" }}>
-              <button type="button" onClick={() => navigate("/ventas/pipeline")}
+              <button type="button" onClick={() => navigate(isVisor ? "/pedidos" : "/ventas/pipeline")}
                 style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "34px", height: "34px", flexShrink: 0, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem" }}>
                 ←
               </button>
@@ -3494,51 +3552,6 @@ const filteredOperarios = useMemo(() => {
                 {pedido.agencia && <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "#064e3b" }}><strong>Agencia:</strong> {pedido.agencia}</p>}
               </div>
 
-              {/* ── Card de pago ── */}
-              {(() => {
-                const pago = pagoLocal ?? pagoActual;
-                const resumen = resumenPago(pago);
-                return (
-                  <div style={{
-                    background: pago ? "#f0fdf4" : "#fffbeb",
-                    border: `1.5px solid ${pago ? "#86efac" : "#fde68a"}`,
-                    borderRadius: "14px",
-                    padding: "16px 18px",
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
-                      <p style={{ margin: 0, fontSize: "0.68rem", fontWeight: 700, color: pago ? "#166534" : "#92400e", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                        {pago ? "💰 Pago registrado" : "⚠ Pago pendiente"}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setShowPagoModal(true)}
-                        style={{
-                          padding: "4px 11px",
-                          borderRadius: "8px",
-                          border: `1.5px solid ${pago ? "#86efac" : "#fde68a"}`,
-                          background: "#fff",
-                          color: pago ? "#166534" : "#92400e",
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {pago ? "✏️ Editar" : "+ Registrar"}
-                      </button>
-                    </div>
-                    {pago ? (
-                      <p style={{ margin: 0, fontSize: "0.85rem", color: "#064e3b", fontWeight: 500, lineHeight: 1.5 }}>
-                        {resumen}
-                      </p>
-                    ) : (
-                      <p style={{ margin: 0, fontSize: "0.82rem", color: "#92400e" }}>
-                        No se ha registrado el pago de este pedido.
-                      </p>
-                    )}
-                  </div>
-                );
-              })()}
-
               {/* Resumen */}
               <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "14px", padding: "16px 18px" }}>
                 <p style={{ margin: "0 0 10px", fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em" }}>Resumen</p>
@@ -3560,20 +3573,6 @@ const filteredOperarios = useMemo(() => {
             </div>
           </div>
 
-          {/* Modal de pago */}
-          {showPagoModal && (
-            <PagoModal
-              pedidoId={id}
-              coleccion={coleccionPago}
-              pagoActual={pagoLocal ?? pagoActual}
-              historial={pagoHistorial}
-              onClose={() => setShowPagoModal(false)}
-              onSaved={(nuevo) => {
-                setPagoLocal(nuevo);
-                setShowPagoModal(false);
-              }}
-            />
-          )}
         </div>
       );
     }
@@ -3836,7 +3835,7 @@ const filteredOperarios = useMemo(() => {
         {/* Header sticky desktop */}
         <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 24px", position: "sticky", top: 0, zIndex: 10 }}>
           <div style={{ maxWidth: "900px", margin: "0 auto", display: "flex", alignItems: "center", gap: "14px" }}>
-            <button type="button" onClick={() => navigate("/ventas/pipeline")}
+            <button type="button" onClick={() => navigate(isVisor ? "/pedidos" : "/ventas/pipeline")}
               style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "34px", height: "34px", flexShrink: 0, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", cursor: "pointer", fontSize: "1rem" }}>
               ←
             </button>
@@ -3852,6 +3851,11 @@ const filteredOperarios = useMemo(() => {
               {pedido.finFecha && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>📅 {formatFecha(pedido.finFecha)}</span>}
               {pedido.metodoEntrega && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🚚 {pedido.metodoEntrega}</span>}
               {pedido.deposito && <span style={{ fontSize: "0.75rem", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 9px" }}>🏭 {pedido.deposito}</span>}
+              {pagoInfo && (
+                <span style={{ fontSize: "0.72rem", fontWeight: 700, background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "6px", padding: "3px 9px", color: "#15803d" }}>
+                  💳 Pagado
+                </span>
+              )}
               {renderVentasCancelBtn()}
             </div>
           </div>
@@ -4290,7 +4294,15 @@ const filteredOperarios = useMemo(() => {
         isVentas ? (
           // === CONTROLADO — VENTAS ===
           <div className="card" style={{ padding: "20px 24px" }}>
-            <ConfirmarDespacho pedidoId={id} />
+            {soloLectura ? (
+              <div style={{ background: "#f8fafc", border: "1.5px dashed #e2e8f0", borderRadius: "14px", padding: "14px 18px", textAlign: "center" }}>
+                <p style={{ margin: 0, fontSize: "0.78rem", color: "#94a3b8" }}>
+                  🔒 Vista de solo lectura — sin acciones disponibles
+                </p>
+              </div>
+            ) : (
+              <ConfirmarDespacho pedidoId={id} />
+            )}
           </div>
         ) : (
           // === CONTROLADO — ENCARGADO ===

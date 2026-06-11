@@ -28,6 +28,17 @@ export const FLUJO_ISABELA = [
     ventasAction: false,
   },
   {
+    // Encargado ISABELA asignó un operario — igual que R8
+    id: "ASIGNADO",
+    label: "Asignado",
+    icon: "👤",
+    color: "#5b21b6",
+    bg: "#f5f3ff",
+    border: "#c4b5fd",
+    headerBg: "#ede9fe",
+    ventasAction: false,
+  },
+  {
     id: "EN_PREPARACION",
     label: "En preparación",
     icon: "⚙️",

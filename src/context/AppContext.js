@@ -42,10 +42,10 @@ export function AppProvider({ children }) {
   const haptics = useHapticsStub();
 
   // Sincronizar depositoActual con el depósito del usuario logueado.
-  // Cualquier rol que tenga campo "deposito" en su perfil queda aislado a ese depósito.
+  // Normalizamos a mayúsculas para que coincida con los valores en Firestore (ej: "ISABELA", "R8").
   useEffect(() => {
     const dep = profile?.deposito;
-    if (dep) setDepositoActual(dep);
+    if (dep) setDepositoActual(String(dep).trim().toUpperCase());
   }, [profile?.deposito]);
 
   // ==========================================

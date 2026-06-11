@@ -276,6 +276,26 @@ export async function asignarOperario(pedidoId, operarioUid, operarioNombre) {
   });
 }
 
+/**
+ * ISABELA: el encargado asigna un pedido a un operario (o se lo autoasigna).
+ *
+ * esSelfAssign = true  → encargado lo hace él mismo → estado EN_PREPARACION
+ * esSelfAssign = false → asigna a Cristian          → estado ASIGNADO
+ */
+export async function asignarPedidoIsabela(pedidoId, operarioId, operarioNombre, esSelfAssign = false) {
+  if (!pedidoId)    throw new Error("Pedido inválido");
+  if (!operarioId)  throw new Error("Operario inválido");
+
+  const nuevoEstado = esSelfAssign ? "EN_PREPARACION" : "ASIGNADO";
+  await updateDoc(doc(db, "pedidos", pedidoId), {
+    operarioId,
+    operarioNombre: operarioNombre || "",
+    estado: nuevoEstado,
+    updatedAt: serverTimestamp(),
+    [`timestamps.${nuevoEstado}`]: serverTimestamp(),
+  });
+}
+
 const OP_KEYS = ["estado", "operarioId", "operarioNombre", "timestamps"];
 
 /**
@@ -345,9 +365,20 @@ export async function upsertPedidoDesdeFinnegans(pedidoInput) {
   // ── Detección de cambios de productos desde Finnegans ────────────────────
   // Solo aplica cuando el pedido YA existía Y su estado es distinto a
   // PENDIENTE_ASIGNAR (si todavía no fue procesado, no hace falta resetear).
+  //
+  // Estados protegidos: pedidos que ya fueron despachados o entregados en
+  // nuestro sistema NO deben retroceder aunque Finnegans cambie sus datos
+  // (ej: Finnegans ajusta cantidades al momento del despacho físico).
+  const ESTADOS_PROTEGIDOS = new Set(["DESP_PENDIENTE", "DESP_ENTREGADO"]);
+
   if (prevSnap.exists()) {
     const estadoActual = prev.estado || "PENDIENTE_ASIGNAR";
     const esPendiente  = estadoActual === "PENDIENTE_ASIGNAR";
+
+    // Si el pedido ya fue despachado/entregado → no tocar nada, salir ya
+    if (ESTADOS_PROTEGIDOS.has(estadoActual)) {
+      return { skipped: true };
+    }
 
     if (!esPendiente) {
       const { hasChanges, added, removed, changed } = _detectProductChanges(
@@ -367,8 +398,11 @@ export async function upsertPedidoDesdeFinnegans(pedidoInput) {
           }
         }
 
-        // Volver al inicio del flujo
-        updateDataRaw.estado           = "PENDIENTE_ASIGNAR";
+        // Decidir a qué estado volver al inicio del flujo:
+        // Si estaba en CON_ERROR Y ya tenía operario asignado (ISABELA) → volver a ASIGNADO
+        // preservando el operario para que no haya que reasignar.
+        const vuelveAAsignado = estadoActual === "CON_ERROR" && !!prev.operarioId;
+        updateDataRaw.estado           = vuelveAAsignado ? "ASIGNADO" : "PENDIENTE_ASIGNAR";
         updateDataRaw.itemsPreparados  = itemsPreparados;
         updateDataRaw.modificacionInfo = {
           at:             serverTimestamp(),
@@ -384,8 +418,11 @@ export async function upsertPedidoDesdeFinnegans(pedidoInput) {
         updateDataRaw.prepAccesoriosOk = null;
         updateDataRaw.bultos           = null;
         updateDataRaw.paquetes         = null;
-        updateDataRaw.operarioId       = null;
-        updateDataRaw.operarioNombre   = null;
+        // Solo limpiar operario si NO volvemos a ASIGNADO (en ese caso se preserva)
+        if (!vuelveAAsignado) {
+          updateDataRaw.operarioId     = null;
+          updateDataRaw.operarioNombre = null;
+        }
       }
     }
   }

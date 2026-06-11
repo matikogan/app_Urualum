@@ -207,11 +207,11 @@ async function finnegGet(path, params = {}) {
     const retryQs = new URLSearchParams({ ...params, ACCESS_TOKEN: newTok }).toString();
     const retryUrl = `${API_BASE}${path}?${retryQs}`;
     const retry = await fetch(retryUrl, { method: "GET" });
-    const txtR = await retry.text();
+    const txtR = await _decodeResponse(retry);
     try { return JSON.parse(txtR); } catch { return txtR; }
   }
 
-  const txt = await res.text();
+  const txt = await _decodeResponse(res);
   try { return JSON.parse(txt); } catch { return txt; }
 }
 
@@ -281,6 +281,18 @@ export async function getResumenStock({
 
 // src/API/finnegans.js
 // === Base ===
+
+// Decodifica la respuesta detectando el encoding real.
+// Finnegans puede declarar charset=utf-8 pero enviar bytes Windows-1252.
+// Intentamos UTF-8 estricto; si falla, redecodificamos como windows-1252.
+async function _decodeResponse(response) {
+  const buf = await response.arrayBuffer();
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch (e) {
+    return new TextDecoder("windows-1252", { fatal: false }).decode(buf);
+  }
+}
 // Deriva la base de la URL del token para que apunten al mismo entorno (test o prod).
 // Si REACT_APP_FINN_API_BASE está definida, la usa directamente.
 // Si no, la infiere desde REACT_APP_FINN_TOKEN_URL quitando el path "/oauth/token".
@@ -344,11 +356,11 @@ async function finnegGet(path, params = {}) {
     const retryQs = new URLSearchParams({ ...params, ACCESS_TOKEN: newTok }).toString();
     const retryUrl = `${API_BASE}${path}?${retryQs}`;
     const retry = await fetch(retryUrl, { method: "GET" });
-    const txtR = await retry.text();
+    const txtR = await _decodeResponse(retry);
     try { return JSON.parse(txtR); } catch { return txtR; }
   }
 
-  const txt = await res.text();
+  const txt = await _decodeResponse(res);
   try { return JSON.parse(txt); } catch { return txt; }
 }
 

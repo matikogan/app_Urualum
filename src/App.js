@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import React, { useEffect } from "react";
 import { useParams, useNavigate, Routes, Route, Navigate } from "react-router-dom";
 
 import { doc, setDoc } from "firebase/firestore";
@@ -28,6 +28,7 @@ import EntregaIsabela from "modules/pedidos/pages/EntregaIsabela";
 // Pedidos (Operario)
 import PedidosAsignadosOperario from "modules/pedidos/components/PedidosAsignadosOperario";
 import PedidoDetalleOperario from "modules/pedidos/components/PedidoDetalleOperario";
+import PedidosOperarioIsabela from "modules/pedidos/pages/PedidosOperarioIsabela";
 
 // Pedidos (Ventas)
 import PedidosControladosVentas from "./modules/pedidos/pages/PedidosControladosVentas";
@@ -35,6 +36,8 @@ import PedidoDetalleVentas from "./modules/pedidos/pages/PedidoDetalleVentas";
 import DespachadosHistorico from "./modules/pedidos/pages/DespachadosHistorico";
 import EntregadosHistorico from "./modules/pedidos/pages/EntregadosHistorico";
 import PipelineVentas from "./modules/pedidos/pages/PipelineVentas";
+import PagosPage from "./modules/pedidos/pages/PagosPage";
+import PedidosSinDeposito from "./modules/pedidos/pages/PedidosSinDeposito";
 
 // Errores (Encargado)
 import ErroresPreparacionPage from "modules/pedidos/pages/ErroresPreparacionPago";
@@ -90,13 +93,36 @@ function NotificationsManager() {
 // Puerta de entrada para /pedidos: elige vista según rol
 function PedidosLanding() {
   const { profile } = useAuth();
-  if (!profile) return null; // opcional: spinner acá
+  const [isDesktop, setIsDesktop] = React.useState(() => window.innerWidth >= 1024);
 
-  const role = String(profile.role || profile.rol || "").toLowerCase();
-  if (role === "operario") return <PedidosAsignadosOperario />;
-  if (role === "ventas" || role === "admin") return <PipelineVentas />;
+  React.useEffect(() => {
+    const h = () => setIsDesktop(window.innerWidth >= 1024);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
 
-  return <Pedidos />; // default para encargados / otros
+  if (!profile) return null;
+
+  // Chequeamos los dos campos posibles para soportar perfiles que tienen ambos
+  // (ej: role:"encargado" antiguo + rol:"visor" nuevo).
+  const roleField = (profile.role || "").toLowerCase();
+  const rolField  = (profile.rol  || "").toLowerCase();
+  const role      = roleField || rolField;            // el primero no vacío
+  const isVisor   = roleField === "visor" || rolField === "visor";
+  const deposito  = (profile.deposito || "").trim().toUpperCase();
+
+  if (role === "operario") {
+    const dep = (profile.deposito || "").trim().toUpperCase();
+    if (dep === "ISABELA") return <PedidosOperarioIsabela />;
+    return <PedidosAsignadosOperario />;
+  }
+  // Visor siempre va al pipeline (solo lectura), aunque tenga otro campo de rol viejo
+  if (isVisor || role === "ventas" || role === "admin") return <PipelineVentas />;
+
+  // Encargado ISABELA en desktop → misma vista que ventas (PipelineVentas)
+  if (role === "encargado" && deposito === "ISABELA" && isDesktop) return <PipelineVentas />;
+
+  return <Pedidos />; // default: encargado R8 o ISABELA en mobile
 }
 
 function ConfirmarDespachoWrapper() {
@@ -172,6 +198,8 @@ export default function App() {
               <Route path="/ventas/despachar/:id" element={<ConfirmarDespachoWrapper />} />
               <Route path="/ventas/despachados" element={<DespachadosHistorico />} />
               <Route path="/ventas/entregados" element={<EntregadosHistorico />} />
+              <Route path="/ventas/pagos" element={<PagosPage />} />
+              <Route path="/ventas/sin-deposito" element={<PedidosSinDeposito />} />
               <Route path="/ventas/pipeline" element={<PipelineVentas />} />
             </Route>
 

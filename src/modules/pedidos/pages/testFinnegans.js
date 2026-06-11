@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { collection, getDocs, query, where, limit } from "firebase/firestore";
+import { db } from "../../../firebase";
 import { getPedidosPendientes, getDespacho, getResumenStock } from "../../../API/finnegans";
 import { useApp } from "../../../context/AppContext";
-import { upsertPedidoDesdeFinnegans } from "../services/pedidosFS";
 import { mapFinDocToPedido } from "../services/mapFinnegans";
+import { syncNuevosPedidos } from "../services/syncFinnegans";
 import { last30DaysRange, today } from "../../../utils/dates";
 
 // Campos relevantes para el despacho — queremos verificar que llegan
@@ -24,7 +26,8 @@ export default function TestFinnegans() {
   const [camposData, setCamposData]  = useState(null);
   const [despachoData, setDespachoData] = useState(null);
   const [loading, setLoading]       = useState(false);
-  const [pedidoTestId, setPedidoTestId] = useState("PEDVTA - 18672");
+  const [pedidoTestId, setPedidoTestId] = useState("PEDVTA - 18685");
+  const [clienteRUTOverride, setClienteRUTOverride] = useState("");
 
   async function loadPendientesUltMes() {
     setLoading(true);
@@ -38,7 +41,7 @@ export default function TestFinnegans() {
     finally { setLoading(false); }
   }
 
-  // ── NUEVO: inspeccionar campos de despacho en la primera fila real ──────
+  // ── Inspeccionar TODOS los campos de las primeras filas del reporte ──────
   async function inspectCamposDespacho() {
     setLoading(true);
     try {
@@ -47,54 +50,87 @@ export default function TestFinnegans() {
       const filas = Array.isArray(res) ? res : [];
       if (filas.length === 0) { toast.error("No hay filas"); return; }
 
-      // Tomamos las primeras 3 filas distintas para comparar
-      const muestra = filas.slice(0, 3).map((fila, i) => {
+      // Todos los campos presentes en el reporte (unión de todas las claves de las primeras 10 filas)
+      const todosCampos = [...new Set(filas.slice(0, 10).flatMap(f => Object.keys(f)))].sort();
+
+      // Tomamos las primeras 2 filas para ver valores reales
+      const muestra = filas.slice(0, 2).map((fila, i) => {
         const mapeado = mapFinDocToPedido(fila);
-        const camposRaw = {};
-        CAMPOS_DESPACHO.forEach(k => {
-          camposRaw[k] = fila[k] ?? "(ausente)";
-        });
+        // Todos los campos del reporte con sus valores
+        const todosValores = {};
+        todosCampos.forEach(k => { todosValores[k] = fila[k] ?? null; });
         return {
           fila: i + 1,
           pedidoId: mapeado?.id || "(sin id)",
           cliente: mapeado?.cliente,
-          // Campos mapeados (lo que guardamos en Firestore)
+          // Lo que guardamos en Firestore
           mapeado: {
+            clienteCodigo:    mapeado?.clienteCodigo,
             clienteRUT:       mapeado?.clienteRUT,
             condicionPago:    mapeado?.condicionPago,
             condicionPagoCod: mapeado?.condicionPagoCod,
             cotizacion:       mapeado?.cotizacion,
             moneda:           mapeado?.moneda,
-            productos:        mapeado?.productos,
           },
-          // Campos crudos de Finnegans
-          crudo: camposRaw,
+          // TODOS los campos crudos del reporte
+          todosCamposDisponibles: todosCampos,
+          crudo: todosValores,
         };
       });
 
       setCamposData(muestra);
       setData(null);
-      toast.success(`Muestra de ${muestra.length} filas lista`);
+      toast.success(`${todosCampos.length} campos disponibles en el reporte`);
     } catch (e) { toast.error(e.message || "Error"); }
     finally { setLoading(false); }
   }
 
-  async function syncAFirestoreUltMes() {
+  // Busca en Firestore un pedido que tenga clienteRUT y condicionPago completos
+  async function autoSeleccionarPedido() {
     setLoading(true);
     try {
-      const { fechaDesde, fechaHasta } = last30DaysRange();
-      const crudos = await getPedidosPendientes({ fechaDesde, fechaHasta });
-      const lista = Array.isArray(crudos) ? crudos : [];
-      let created = 0, updated = 0, skipped = 0;
-      for (const fin of lista) {
-        const p = mapFinDocToPedido(fin);
-        if (!p?.id) { skipped++; continue; }
-        const res = await upsertPedidoDesdeFinnegans(p);
-        if (res?.created) created++; else updated++;
+      const snap = await getDocs(
+        query(collection(db, "pedidos"),
+          where("clienteRUT", "!=", null),
+          limit(20)
+        )
+      );
+      const docs = snap.docs.map(d => d.data()).filter(d =>
+        d.clienteRUT && d.productos?.length > 0 && d.deposito
+      );
+      if (docs.length === 0) {
+        toast.error("No hay pedidos con datos completos. Hacé el sync primero.");
+        return;
       }
-      toast.success(`Sync OK (${fechaDesde}→${fechaHasta}) — creados:${created} · actualizados:${updated} · omitidos:${skipped}`);
-    } catch (e) { toast.error(e.message || "Error sincronizando"); }
-    finally { setLoading(false); }
+      const elegido = docs[0];
+      setPedidoTestId(elegido.id);
+      toast.success(`Pedido seleccionado: ${elegido.id} | Cliente: ${elegido.cliente} | RUT: ${elegido.clienteRUT}`);
+    } catch (e) {
+      toast.error(e.message || "Error buscando pedido");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function syncAFirestore(dias = 7) {
+    setLoading(true);
+    try {
+      const hoy = new Date();
+      const desde = new Date(); desde.setDate(hoy.getDate() - dias);
+      const fmt = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+      const fechaDesde = fmt(desde);
+      const fechaHasta = fmt(hoy);
+      toast.info(`Sincronizando últimos ${dias} días (${fechaDesde} → ${fechaHasta})…`);
+      const res = await syncNuevosPedidos({ fechaDesde, fechaHasta, debug: true });
+      toast.success(
+        `Sync OK — ${res.total} pedidos | +${res.created} creados | ↺${res.updated} actualizados | ⊘${res.skipped} omitidos`
+      );
+    } catch (e) {
+      console.error("[SYNC] error:", e);
+      toast.error(e.message || "Error sincronizando");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function loadResumenStockHoy() {
@@ -114,7 +150,9 @@ export default function TestFinnegans() {
     try {
       const functions = getFunctions(undefined, "us-central1");
       const despachar = httpsCallable(functions, "despacharEnFinnegans");
-      const result = await despachar({ pedidoId: pedidoTestId.trim(), modoTest: true });
+      const payload = { pedidoId: pedidoTestId.trim(), modoTest: true };
+      if (clienteRUTOverride.trim()) payload.clienteRUTOverride = clienteRUTOverride.trim();
+      const result = await despachar(payload);
       setDespachoData(result.data);
       setCamposData(null);
       setData(null);
@@ -154,12 +192,30 @@ export default function TestFinnegans() {
             placeholder="ID pedido (ej: PEDVTA - 18672)"
           />
           <button
+            className="border px-2 py-1 rounded bg-gray-500 text-white text-xs"
+            onClick={autoSeleccionarPedido}
+            disabled={loading}
+            title="Busca en Firestore un pedido con datos completos"
+          >
+            🎯 Auto
+          </button>
+          <button
             className="border px-3 py-1 rounded bg-orange-500 text-white font-bold"
             onClick={testDespacharCF}
             disabled={loading}
           >
             {loading ? "Llamando…" : "▶ Generar payload (modoTest)"}
           </button>
+        </div>
+        <div className="flex gap-2 items-center">
+          <span className="text-xs text-gray-500">RUT override (opcional):</span>
+          <input
+            className="border rounded px-2 py-1 text-sm w-40"
+            value={clienteRUTOverride}
+            onChange={e => setClienteRUTOverride(e.target.value)}
+            placeholder="ej: 41893519"
+          />
+          <span className="text-xs text-gray-400">Si el pedido no tiene RUT en Firestore, ingresalo acá para el test</span>
         </div>
         {despachoData && (
           <pre className="p-3 bg-gray-900 text-green-400 rounded overflow-auto text-xs">
@@ -185,8 +241,11 @@ export default function TestFinnegans() {
         >
           🔍 Inspeccionar campos despacho
         </button>
-        <button className="border px-3 py-1 rounded bg-blue-600 text-white" onClick={syncAFirestoreUltMes} disabled={loading}>
-          {loading ? "Sincronizando…" : "Sincronizar último mes → Firestore"}
+        <button className="border px-3 py-1 rounded bg-blue-500 text-white" onClick={() => syncAFirestore(7)} disabled={loading}>
+          {loading ? "Sincronizando…" : "⚡ Sync 7 días → Firestore"}
+        </button>
+        <button className="border px-3 py-1 rounded bg-blue-700 text-white" onClick={() => syncAFirestore(30)} disabled={loading}>
+          {loading ? "Sincronizando…" : "Sync 30 días → Firestore"}
         </button>
       </div>
 
