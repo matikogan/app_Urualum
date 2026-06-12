@@ -309,6 +309,16 @@ export default function Inicio() {
             </button>
           )}
 
+          {profile?.rol === "encargado" && !isIsabela && (
+            <button
+              className="btn btn--outline btn-big-adaptive btn--elevated"
+              onClick={() => navigate("/encargado/etiquetas")}
+            >
+              <span className="btn-icon">🏷️</span>
+              Etiquetas
+            </button>
+          )}
+
           {profile?.rol === "encargado" && (
             <button
               className="btn btn--outline btn-big-adaptive btn--elevated"
