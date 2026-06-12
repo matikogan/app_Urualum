@@ -55,7 +55,15 @@ export async function actualizarEscaneadosCarga(cargaId, escaneados) {
 export async function marcarCargaCompleta(cargaId, completa) {
   if (!cargaId) return;
   const ref = doc(db, "cargasEtiquetas", cargaId);
-  await updateDoc(ref, { completa: !!completa });
+  const data = { completa: !!completa };
+  if (completa) data.completadaAt = serverTimestamp();
+  await updateDoc(ref, data);
+}
+
+// Historial: cargas ya finalizadas (completa === true), más recientes primero.
+export async function listarCargasCompletas() {
+  const todas = await listarCargas();
+  return todas.filter((c) => c.completa);
 }
 
 // Dirección/localidad por cliente — se completa una vez y queda guardada

@@ -27,6 +27,7 @@ import EntregaIsabela from "modules/pedidos/pages/EntregaIsabela";
 import EtiquetasSeleccion from "modules/pedidos/pages/EtiquetasSeleccion";
 import EtiquetasCarga from "modules/pedidos/pages/EtiquetasCarga";
 import EtiquetasControl from "modules/pedidos/pages/EtiquetasControl";
+import EtiquetasHistorial from "modules/pedidos/pages/EtiquetasHistorial";
 
 // Pedidos (Operario)
 import PedidosAsignadosOperario from "modules/pedidos/components/PedidosAsignadosOperario";
@@ -189,6 +190,7 @@ export default function App() {
             <Route path="/encargado/etiquetas" element={<EtiquetasSeleccion />} />
             <Route path="/encargado/etiquetas/carga" element={<EtiquetasCarga />} />
             <Route path="/encargado/etiquetas/control" element={<EtiquetasControl />} />
+            <Route path="/encargado/etiquetas/historial" element={<EtiquetasHistorial />} />
             <Route path="/errores/nuevo" element={<ErrorCarga />} />
             <Route path="/actitud/nuevo" element={<ActitudCarga />} />
             <Route path="/reporte/semanal" element={<ReporteSemanal />} />

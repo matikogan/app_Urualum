@@ -118,7 +118,12 @@ export default function EtiquetasSeleccion() {
     <div style={{ padding: "16px", maxWidth: "640px", margin: "0 auto" }}>
       <button onClick={() => navigate(-1)} style={volverStyle}>← Volver</button>
 
-      <h2 style={{ margin: "0 0 4px", fontSize: "1.1rem" }}>🏷️ Etiquetas</h2>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <h2 style={{ margin: "0 0 4px", fontSize: "1.1rem" }}>🏷️ Etiquetas</h2>
+        <button onClick={() => navigate("/encargado/etiquetas/historial")} style={{ background: "none", border: "none", color: "#2563eb", fontWeight: 600, fontSize: "0.8rem", cursor: "pointer" }}>
+          📋 Historial
+        </button>
+      </div>
 
       {/* === Cargas en curso === */}
       {!cargaActiva && (
