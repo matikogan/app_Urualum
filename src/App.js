@@ -24,6 +24,9 @@ import ControlCarga from "modules/pedidos/pages/ControlCarga";
 import GestionCamiones from "modules/pedidos/pages/GestionCamiones";
 import ControlCamion from "modules/pedidos/pages/ControlCamion";
 import EntregaIsabela from "modules/pedidos/pages/EntregaIsabela";
+import EtiquetasSeleccion from "modules/pedidos/pages/EtiquetasSeleccion";
+import EtiquetasCarga from "modules/pedidos/pages/EtiquetasCarga";
+import EtiquetasControl from "modules/pedidos/pages/EtiquetasControl";
 
 // Pedidos (Operario)
 import PedidosAsignadosOperario from "modules/pedidos/components/PedidosAsignadosOperario";
@@ -183,6 +186,9 @@ export default function App() {
             <Route path="/encargado/camiones" element={<GestionCamiones />} />
             <Route path="/encargado/camiones/:camionId" element={<ControlCamion />} />
             <Route path="/encargado/entrega/:id" element={<EntregaIsabela />} />
+            <Route path="/encargado/etiquetas" element={<EtiquetasSeleccion />} />
+            <Route path="/encargado/etiquetas/carga" element={<EtiquetasCarga />} />
+            <Route path="/encargado/etiquetas/control" element={<EtiquetasControl />} />
             <Route path="/errores/nuevo" element={<ErrorCarga />} />
             <Route path="/actitud/nuevo" element={<ActitudCarga />} />
             <Route path="/reporte/semanal" element={<ReporteSemanal />} />

@@ -133,6 +133,20 @@ service cloud.firestore {
       allow write: if isAuthed() && isAdmin();
     }
 
+    // === DIRECCIONES DE CLIENTES PARA ETIQUETAS ===
+    // El encargado completa/edita dirección y localidad al imprimir etiquetas
+    match /clientesDireccion/{clienteCodigo} {
+      allow read: if isAuthed();
+      allow write: if isAuthed() && (isEncargado() || isAdmin());
+    }
+
+    // === CARGAS DE ETIQUETAS (camiones/giras) ===
+    // El encargado crea cargas, agrega pedidos e imprime/controla la carga
+    match /cargasEtiquetas/{cargaId} {
+      allow read: if isAuthed();
+      allow write: if isAuthed() && (isEncargado() || isAdmin());
+    }
+
     // === REGLAS DE PRECIOS ===
     // Permitir leer a usuarios autenticados para calcular descuentos
     match /config_lista_precios/{id} {
