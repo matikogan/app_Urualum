@@ -102,31 +102,37 @@ export default function QrScanner({ onScanSuccess, onError, qrbox, fps = 10 }) {
         }
         const cam = pickBackCamera(cameras);
 
-        // 4) Iniciar con deviceId (más confiable que facingMode)
-        await html5QrCode.start(
-          { deviceId: { exact: cam.id } },
-          {
-            fps,
-            qrbox: qrbox || { width: 250, height: 250 },
-            rememberLastUsedCamera: true,
-          },
-          (decodedText) => {
-            let payload = decodedText;
-            try {
-              const obj = JSON.parse(decodedText);
-              const codUru =
-                obj.codigo_urualum || obj.codUru || obj.codigo || obj.code || null;
-              const packSize = Number(obj.cantidad || obj.tiras || obj.qty || 0);
-              payload = { ...obj, codUru, packSize };
-            } catch {
-              // si no es JSON, dejamos el string crudo
-            }
-            onScanSuccess?.(payload);
-          },
-          () => {
-            // errores de decodificación por frame: ignorar
+        const config = {
+          fps,
+          qrbox: qrbox || { width: 250, height: 250 },
+          rememberLastUsedCamera: true,
+        };
+        const onDecoded = (decodedText) => {
+          let payload = decodedText;
+          try {
+            const obj = JSON.parse(decodedText);
+            const codUru =
+              obj.codigo_urualum || obj.codUru || obj.codigo || obj.code || null;
+            const packSize = Number(obj.cantidad || obj.tiras || obj.qty || 0);
+            payload = { ...obj, codUru, packSize };
+          } catch {
+            // si no es JSON, dejamos el string crudo
           }
-        );
+          onScanSuccess?.(payload);
+        };
+        const onDecodeError = () => {
+          // errores de decodificación por frame: ignorar
+        };
+
+        // 4) Iniciar con deviceId (más confiable que facingMode), con
+        //    fallback a facingMode "environment" si la cámara puntual
+        //    no puede abrirse con esos parámetros ("Could not start video source").
+        try {
+          await html5QrCode.start({ deviceId: { exact: cam.id } }, config, onDecoded, onDecodeError);
+        } catch (errDeviceId) {
+          console.warn("[QR] fallo con deviceId, reintentando con facingMode:", errDeviceId);
+          await html5QrCode.start({ facingMode: "environment" }, config, onDecoded, onDecodeError);
+        }
 
         if (!mounted) return;
         startedRef.current = true;
